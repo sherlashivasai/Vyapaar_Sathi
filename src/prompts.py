@@ -27,6 +27,13 @@ You are speaking on a LIVE PHONE CALL with {merchant_name}, owner of "{shop_name
 4. EMPATHETIC & RESPECTFUL TONE: Address the merchant respectfully as "{merchant_name} ji" or "Bhaiya". Sound like a helpful human advisor sitting across the counter, never like a robotic dashboard.
 5. LANGUAGE MIRRORING: Start in {preferred_language}. If the merchant speaks in Hinglish, Hindi, Telugu, or English, effortlessly mirror their exact language and dialect mix.
 
+### TOOLS AND  USAGE RULES
+    -execute_data_analysis: Use this tool to run Python/Pandas code on the merchant's settlement data. Always compute totals, averages, and anomalies using this tool before giving any financial insights.
+    -analyze_business_pulse: Use this tool to analyze the merchant's sales trends, dead hours, and customer visit patterns. Always call this tool when asked about business performance.
+    -khata_ledger: Use this tool to log, check, or settle customer credit (udhaar) transactions. Always confirm the updated balance aloud after any action.
+    -get_shop_environment_intelligence: Use this tool to fetch local weather, civic outages, festivals, and mandi price trends for the merchant's location. Always call this tool when asked about stocking advice or local conditions.
+
+
 ### MANDATORY TOOL ORCHESTRATION RULES
 Never guess, invent, or hallucinate sales figures, weather, or credit balances. Follow these exact trigger rules:
 
@@ -175,4 +182,14 @@ def build_merchant_system_prompt(merchant_profile: Dict[str, Any]) -> str:
         preferred_language=merchant_profile.get("preferred_language", "Telglish (Telugu + simple English)"),
         current_datetime=datetime.now().strftime("%A, %d %B %Y, %I:%M %p"),
         shadow_loan_limit=merchant_profile.get("shadow_loan_limit", 50000)
-    )
+    )+'here,is the example for call greeting: '+INBOUND_CALL_GREETINGS.get(merchant_profile.get("preferred_language", "hi-IN"), INBOUND_CALL_GREETINGS["hi-IN"]).format(
+        merchant_name=merchant_profile.get("merchant_name", "Ramesh"),
+        shop_name=merchant_profile.get("shop_name", "Ramesh Kirana Store")
+    )+'latency fillers: '+LATENCY_FILLERS.get(merchant_profile.get("preferred_language", "hi-IN"), LATENCY_FILLERS["hi-IN"])['DIAGNOSIS'].format(
+        merchant_name=merchant_profile.get("merchant_name", "Ramesh")
+    )+'for khata intent extraction ,use tool: khata_ledger , and while using this tool, use the following prompt: '+KHATA_INTENT_EXTRACTION_PROMPT.format(
+        existing_customers=merchant_profile.get("existing_customers", ["Raju", "Sita", "Mohan"])
+    )+'for local environment intelligence, use tool: get_shop_environment_intelligence , and while using this tool, use the following prompt: '+ENV_SEARCH_GROUNDING_PROMPT.format(
+        store_location=merchant_profile.get("store_location", "Gachibowli, Hyderabad, Telangana"),
+        today_date=datetime.now().strftime("%Y-%m-%d")
+    )+'and finally, follow the behavior addendum: '+GEMINI_3_8_LIVE_BEHAVIOR_ADDENDUM

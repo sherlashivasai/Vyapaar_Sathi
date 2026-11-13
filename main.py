@@ -11,6 +11,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from src.voice_agent import GeminiLive
+from src.tools.execute_data_analysis import execute_data_analysis
+from src.tools.get_shop_environment_intelligence import get_shop_environment_intelligence
+from src.tools.analyze_business_pulse import analyze_business_pulse
+from src.tools.khata_ledger import khata_ledger
+
+from src.prompts import build_merchant_system_prompt 
 from twilio_handler import TwilioHandler
 
 # Load environment variables
@@ -26,7 +32,22 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-MODEL = os.getenv("MODEL", "gemini-3.8-live")
+MODEL = os.getenv("MODEL2", "gemini-3.8-live")
+
+merchant_profile = {
+    "merchant_id": "M123456",
+    "merchant_name": "Rajaiah",
+    "shop_name": "Rajaiah Kirana Store",
+    "shop_category": "Kirana & General Store",
+    "items_available": ["Rice", "Wheat Flour", "Sugar", "Cooking Oil","Onions",'Potatoes','Ginger','Garlic','Chillies','Spices','Snacks','Biscuits','Soft Drinks'],
+    "store_location": "vegetable market, Mancherial, Telangana",
+    "lat": 18.8756,
+    "lon": 79.4591,
+    "preferred_language": "Telglish (Telugu + simple English)",
+    "shadow_loan_limit": 50000,
+    "existing_customers": ["Raju", "Sita", "Mohan"]
+}
+
 
 # Twilio config (optional — only needed for phone call integration)
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
@@ -72,7 +93,7 @@ async def websocket_endpoint(websocket: WebSocket):
         pass
 
     gemini_client = GeminiLive(
-        api_key=GEMINI_API_KEY, model=MODEL, input_sample_rate=16000
+        api_key=GEMINI_API_KEY, model=MODEL, input_sample_rate=16000,system_prompt=build_merchant_system_prompt(merchant_profile)
     )
 
     async def receive_from_client():

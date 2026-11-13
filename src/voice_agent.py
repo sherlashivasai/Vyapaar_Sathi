@@ -7,8 +7,21 @@ import logfire
 from google import genai
 from google.genai import types
 
-from .prompts import SYSTEM_PROMPT
+from .prompts import build_merchant_system_prompt
 
+merchant_profile = {
+    "merchant_id": "M123456",
+    "merchant_name": "Rajaiah",
+    "shop_name": "Rajaiah Kirana Store",
+    "shop_category": "Kirana & General Store",
+    "items_available": ["Rice", "Wheat Flour", "Sugar", "Cooking Oil","Onions",'Potatoes','Ginger','Garlic','Chillies','Spices','Snacks','Biscuits','Soft Drinks'],
+    "store_location": "vegetable market, Mancherial, Telangana",
+    "lat": 18.8756,
+    "lon": 79.4591,
+    "preferred_language": "Telglish (Telugu + simple English)",
+    "shadow_loan_limit": 50000,
+    "existing_customers": ["Raju", "Sita", "Mohan"]
+}
 
 class GeminiLive:
     """
@@ -30,7 +43,7 @@ class GeminiLive:
         self.client = genai.Client(api_key=api_key)
         self.tools = tools or []
         self.tool_mapping = tool_mapping or {}
-        self.system_prompt = system_prompt or SYSTEM_PROMPT
+        self.system_prompt = system_prompt or build_merchant_system_prompt(merchant_profile)
         self.custom_vocabulary = custom_vocabulary or [
             "Paytm", "Vyapar Saathi", "Khata", "Udhaar", "Baaki", "Mandi", "Kirana"
         ]
