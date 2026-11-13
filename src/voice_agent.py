@@ -35,7 +35,6 @@ class GeminiLive:
         tools: Optional[List[Any]] = None,
         tool_mapping: Optional[Dict[str, Any]] = None,
         system_prompt: Optional[str] = None,
-        custom_vocabulary: Optional[List[str]] = None,
     ):
         self.api_key = api_key
         self.model = model
@@ -44,9 +43,6 @@ class GeminiLive:
         self.tools = tools or []
         self.tool_mapping = tool_mapping or {}
         self.system_prompt = system_prompt or build_merchant_system_prompt(merchant_profile)
-        self.custom_vocabulary = custom_vocabulary or [
-            "Paytm", "Vyapar Saathi", "Khata", "Udhaar", "Baaki", "Mandi", "Kirana"
-        ]
 
     async def start_session(
         self,
@@ -71,9 +67,7 @@ class GeminiLive:
             "system_instruction": types.Content(
                 parts=[types.Part.from_text(text=active_prompt)]
             ),
-            "input_audio_transcription": types.AudioTranscriptionConfig(
-                custom_vocabulary=self.custom_vocabulary
-            ),
+            "input_audio_transcription": types.AudioTranscriptionConfig(),
             "output_audio_transcription": types.AudioTranscriptionConfig(),
             "realtime_input_config": types.RealtimeInputConfig(
                 turn_coverage="TURN_INCLUDES_ONLY_ACTIVITY",

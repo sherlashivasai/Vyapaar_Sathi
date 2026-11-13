@@ -1,12 +1,12 @@
 # Merchant AI
 
-A real-time, multimodal merchant assistant built with FastAPI and the Gemini Live API. The browser app supports live audio conversations, typed messages, and optional camera or screen input. An optional Twilio integration connects phone calls to the assistant. The project also includes utilities for loading and analyzing merchant settlement reports.
+A real-time, multimodal merchant assistant built with FastAPI and the Gemini Live API. The browser app supports live audio conversations, typed messages, and optional camera or screen input. The project also includes utilities for loading and analyzing merchant settlement reports.
 
 ## Features
 
 - Low-latency, two-way voice conversations through a browser.
 - Optional text, camera, and screen-sharing input.
-- Optional inbound and outbound phone calls through Twilio.
+- A browser disconnect control that ends the live voice session.
 - CSV and PDF settlement-report ingestion into a local SQLite database.
 - A data-analysis tool for querying settlement data.
 
@@ -42,18 +42,6 @@ A real-time, multimodal merchant assistant built with FastAPI and the Gemini Liv
 
 5. Open [http://localhost:8000](http://localhost:8000), select **Connect**, and grant microphone access. Start the microphone to speak. Camera, screen sharing, and typed messages are available in the connected interface.
 
-## Optional Twilio phone integration
-
-To enable phone calls, add these values to `.env`:
-
-```dotenv
-TWILIO_ACCOUNT_SID=your_twilio_account_sid
-TWILIO_AUTH_TOKEN=your_twilio_auth_token
-TWILIO_APP_HOST=your_public_host
-```
-
-`TWILIO_APP_HOST` should be the publicly reachable host serving the app, without a URL scheme. Configure your Twilio number to send inbound calls to `POST /twilio/inbound`. The outbound endpoint is `POST /twilio/outbound` and accepts `to_number` and `from_number` as E.164 query parameters. Twilio Media Streams require a public, TLS-enabled WebSocket endpoint.
-
 ## Settlement data
 
 Settlement CSV files are in `data/`. The ingestion utility reads CSV or PDF reports that match the expected settlement schema and inserts them into SQLite while skipping duplicate transaction keys.
@@ -69,8 +57,7 @@ This writes to `payment_data.db`, which is local runtime data and is excluded fr
 ## Project layout
 
 ```text
-main.py                         FastAPI app, browser WebSocket, and Twilio endpoints
-twilio_handler.py               Twilio Media Streams integration
+main.py                         FastAPI app and browser WebSocket
 src/voice_agent.py              Gemini Live session and event handling
 src/tools/                      Settlement ingestion and analysis utilities
 src/frontend/                   Browser interface and media client
@@ -81,4 +68,4 @@ data/                           Settlement report CSV inputs
 
 - Run commands from the repository root; the app serves frontend assets from `src/frontend`.
 - Keep API keys in `.env`; do not commit secrets.
-- Phone integration is optional; the browser application only requires `GEMINI_API_KEY`.
+- The browser application requires `GEMINI_API_KEY`.

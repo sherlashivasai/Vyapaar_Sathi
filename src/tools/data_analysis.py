@@ -7,7 +7,7 @@ from io import StringIO
 
 DB_URL = "sqlite:///payment_data.db"
 engine = create_engine(DB_URL)
-TABLE_NAME = "merchant_settlement_reports_for_Nov-06_to_Nov-11"
+TABLE_NAME = "merchant_settlement_reports"
 
 @tool
 def execute_data_analysis(python_code: str) -> str:

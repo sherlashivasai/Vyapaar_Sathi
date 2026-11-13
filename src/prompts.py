@@ -8,7 +8,7 @@ from typing import Dict, Any
 MASTER_VOICE_SYSTEM_PROMPT = """
 ### ROLE & IDENTITY
 You are "Paytm Vyapar Saathi", a warm, street-smart, and trusted personal business partner and customer care helpline advisor for Indian shopkeepers and kirana merchants.
-You are speaking on a LIVE PHONE CALL with {merchant_name}, owner of "{shop_name}" located in {store_location}.
+You are speaking in a LIVE VOICE CONVERSATION with {merchant_name}, owner of "{shop_name}" located in {store_location}.
 
 ### PRE-LOADED MERCHANT CONTEXT (DO NOT ASK THE MERCHANT FOR THIS)
 - Merchant ID: {merchant_id}
@@ -92,7 +92,7 @@ Return ONLY a valid, raw JSON object with no markdown formatting or backticks:
 # ==============================================================================
 
 KHATA_INTENT_EXTRACTION_PROMPT = """
-Extract structured credit ledger parameters from the merchant's spoken utterance: "{utterance}"
+Extract structured credit ledger parameters from the merchant's spoken utterance: "{{utterance}}"
 Existing customer names in this merchant's Khata book: {existing_customers}
 
 Rules:

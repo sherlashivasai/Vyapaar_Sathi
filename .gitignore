@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# Ignore agent workspaces
+work.md
+
 # Python
 .venv/
 venv/

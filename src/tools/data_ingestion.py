@@ -288,7 +288,7 @@ if __name__ == "__main__":
 
     database_path = project_root / "payment_data.db"
     database_url = f"sqlite:///{database_path.as_posix()}"
-    target_table = "merchant_settlement_reports_for_Nov-06_to_Nov-11"
+    target_table = "merchant_settlement_reports"
     ingestion = DataIngestion()
 
     for path in data_files:

@@ -26,7 +26,7 @@ class DataAnalysisOutput(BaseModel):
     
 
 DB_URL = "sqlite:///payment_data.db"
-TABLE_NAME = "merchant_settlement_reports_for_Nov-06_to_Nov-11"
+TABLE_NAME = "merchant_settlement_reports"
 engine = create_engine(DB_URL)
 
 
