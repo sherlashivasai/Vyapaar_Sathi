@@ -1,0 +1,16 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+websockets==13.0
+pydantic==2.9.2
+python-dotenv==1.0.1
+httpx==0.28.1
+pandas==2.2.3
+numpy==2.1.1
+supabase==2.11.0
+redis==5.1.1
+google-genai==2.0.0
+langgraph==0.2.35
+langchain-google-genai
+langchain-groq
+ipykernel
+feedparser==6.0.11
