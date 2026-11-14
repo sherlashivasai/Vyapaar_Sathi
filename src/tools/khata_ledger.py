@@ -2,9 +2,11 @@ import difflib
 from datetime import date, datetime, timedelta
 from typing import Dict, Any, Optional, List
 
+import logfire
 from sqlalchemy import Column, Integer, String, Float, Date, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
-from google.genai import types
+
+from src.db import APP_DB_URL
 
 Base = declarative_base()
 
@@ -25,11 +27,12 @@ class KhataLedger(Base):
     promised_return_date = Column(Date, nullable=True)
 
 
-engine = create_engine("sqlite:///./vyapar_saathi.db", connect_args={"check_same_thread": False})
+engine = create_engine(APP_DB_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 def init_and_seed_khata():
+    logfire.info("Initializing khata ledger database", database_url=APP_DB_URL)
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
@@ -161,6 +164,13 @@ async def manage_khata_ledger(
     """
     Logs, checks, or updates customer credit (udhaar) details in the merchant's Khata ledger.
     """
+    logfire.info(
+        "Khata ledger action requested",
+        action=action,
+        merchant_id=merchant_id,
+        customer_name=name,
+        database_url=APP_DB_URL,
+    )
     db = SessionLocal()
     try:
         act = action.upper().strip()
@@ -348,6 +358,19 @@ async def manage_khata_ledger(
             "message": f"Unsupported action '{action}'. Use 'LOG', 'CHECK', or 'UPDATE'.",
         }
 
+    except Exception as exc:
+        logfire.exception(
+            "Khata ledger action failed",
+            action=action,
+            merchant_id=merchant_id,
+            customer_name=name,
+            database_url=APP_DB_URL,
+        )
+        return {
+            "status": "error",
+            "retryable": False,
+            "message": f"Khata action failed: {exc}",
+        }
     finally:
         db.close()
 
@@ -356,53 +379,36 @@ async def manage_khata_ledger(
 # 4. LLM FUNCTION DECLARATION
 # ==============================================================================
 
-KHATA_TOOL_DECLARATION = types.FunctionDeclaration(
-    name="manage_khata_ledger",
-    description=(
-        "Use this tool to log, check, or update customer credit (udhaar) details in the merchant's khata ledger. "
-        "Also returns `due_notifications` to alert the merchant of customers whose promised return date is today or overdue."
-    ),
-    behavior="NON_BLOCKING",
-    parameters=types.Schema(
-        type="OBJECT",
-        properties={
-            "action": types.Schema(
-                type="STRING",
-                enum=["LOG", "CHECK", "UPDATE"],
-                description=(
-                    "'LOG' to record new credit given to a customer; "
-                    "'CHECK' to inspect a specific customer's credit or list all pending credit; "
-                    "'UPDATE' to modify a customer's remaining balance (including partial/full repayment), phone number, or promised return date."
-                ),
-            ),
-            "name": types.Schema(
-                type="STRING",
-                description="Customer name (e.g., 'Raju', 'Lakshmi'). Optional only when action='CHECK' for all customers.",
-            ),
-            "phone_no": types.Schema(
-                type="STRING",
-                description="Customer's 10-digit phone number if mentioned by the merchant.",
-            ),
-            "amount": types.Schema(
-                type="NUMBER",
-                description=(
-                    "For 'LOG': rupee amount of credit given. "
-                    "For 'UPDATE': the updated total balance remaining (set to 0 if the customer paid back in full)."
-                ),
-            ),
-            "date_given": types.Schema(
-                type="STRING",
-                description="Date the credit was given in YYYY-MM-DD format (convert words like 'today' or 'yesterday' to YYYY-MM-DD).",
-            ),
-            "promised_return_date": types.Schema(
-                type="STRING",
-                description="Date the customer promised to return the money in YYYY-MM-DD format (convert phrases like 'next Sunday' or 'in 5 days' to YYYY-MM-DD).",
-            ),
+KHATA_TOOL_DECLARATION = {
+    "type": "function",
+    "function": {
+        "name": "manage_khata_ledger",
+        "description": (
+            "Use this tool to log, check, or update customer credit (udhaar) details in the merchant's khata ledger. "
+            "Returns due notifications for customers whose promised return date is today or overdue."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["LOG", "CHECK", "UPDATE"],
+                    "description": "Action to perform on the khata ledger.",
+                },
+                "name": {"type": "string", "description": "Customer name."},
+                "phone_no": {"type": "string", "description": "Customer phone number."},
+                "amount": {"type": "number", "description": "Credit amount or updated balance."},
+                "date_given": {"type": "string", "description": "Date in YYYY-MM-DD format."},
+                "promised_return_date": {"type": "string", "description": "Promise date in YYYY-MM-DD format."},
+            },
+            "required": ["action"],
         },
-        required=["action"],
-    ),
-)
+    },
+}
+
+khata_ledger = manage_khata_ledger
 
 KHATA_TOOL_MAPPING = {
     "manage_khata_ledger": manage_khata_ledger,
+    "khata_ledger": khata_ledger,
 }

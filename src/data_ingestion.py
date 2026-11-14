@@ -19,6 +19,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
+if __package__:
+    from .db import APP_DB_URL
+else:
+    from db import APP_DB_URL
+
 
 PRIMARY_KEY_COLUMNS = ("phonepereferenceid", "instrument")
 NUMERIC_COLUMNS = {"amount", "fee", "igst", "cgst", "sgst"}
@@ -194,7 +199,7 @@ class DataIngestion:
     def ingest_to_sql(
         self,
         file_path: str,
-        db_url: str = "sqlite:///payment_data.db",
+        db_url: str = APP_DB_URL,
         table_name: str | None = None,
     ) -> int:
         """Append a CSV or PDF to a SQL table, skipping existing transaction keys."""
@@ -242,9 +247,10 @@ class DataIngestion:
                 "Parsed input",
                 row_count=len(df),
                 columns=list(df.columns),
+                database_url=db_url,
             )
 
-            engine = create_engine(db_url)
+            engine = create_engine(db_url, connect_args={"check_same_thread": False})
             try:
                 _ensure_table(engine, table_name, SETTLEMENT_COLUMNS)
                 with engine.begin() as connection:
@@ -280,16 +286,17 @@ class DataIngestion:
 
 if __name__ == "__main__":
     logfire.configure(service_name="merchant-ai")
-    project_root = Path(__file__).resolve().parents[2]
+    project_root = Path(__file__).resolve().parents[1]
     data_directory = project_root / "data"
     data_files = sorted(data_directory.glob("Merchant_Settlement_Report_*.csv"))
     if not data_files:
         raise FileNotFoundError(f"No settlement CSV files found in {data_directory}")
 
-    database_path = project_root / "payment_data.db"
+    database_path = project_root / "vyapar_saathi.db"
     database_url = f"sqlite:///{database_path.as_posix()}"
     target_table = "merchant_settlement_reports"
     ingestion = DataIngestion()
+    logfire.info("Using unified merchant database for settlement ingestion", database_url=database_url)
 
     for path in data_files:
         ingestion.ingest_to_sql(

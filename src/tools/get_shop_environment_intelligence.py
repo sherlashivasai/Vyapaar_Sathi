@@ -6,10 +6,11 @@ from typing import Dict, Any, Optional, List
 
 import httpx
 import logfire
+from sarvamai import AsyncSarvamAI
 from sqlalchemy import Column, String, Float, DateTime, Text, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
-from google import genai
-from google.genai import types
+
+from src.db import APP_DB_URL
 
 Base = declarative_base()
 
@@ -17,8 +18,9 @@ Base = declarative_base()
 CACHE_TTL_HOURS = 4
 REFRESH_INTERVAL_SECONDS = CACHE_TTL_HOURS * 3600
 
-# Initialize Google GenAI Client (uses GEMINI_API_KEY from environment)
-genai_client = genai.Client()
+# Initialize Sarvam client from environment variables.
+sarvam_api_key = os.getenv("SARVAM_API_KEY")
+sarvam_client = AsyncSarvamAI(api_subscription_key=sarvam_api_key) if sarvam_api_key else None
 
 WMO_CODES = {
     0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
@@ -42,9 +44,10 @@ class EnvIntelligenceCache(Base):
     updated_at = Column(DateTime, default=datetime.utcnow)
 
 
-engine = create_engine("sqlite:///./vyapar_saathi.db", connect_args={"check_same_thread": False})
+engine = create_engine(APP_DB_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base.metadata.create_all(bind=engine)
+logfire.info("Environment intelligence database initialized", database_url=APP_DB_URL)
 
 # Fast in-memory L1 cache layered on top of SQLite L2 cache
 _MEMORY_CACHE: Dict[str, Dict[str, Any]] = {}
@@ -125,25 +128,19 @@ async def _fetch_open_meteo_weather(
 
 async def _run_sub_llm_grounded_intelligence(store_location: str, shop_category: str) -> Dict[str, Any]:
     """
-    Sub-LLM Worker: Uses Gemini 2.5 Flash + Google Search Grounding to dynamically
-    select commodities based on `shop_category` and fetch real-time mandi prices,
-    civic outages, protests, and festivals for `store_location`.
+    Runs the Sarvam chat model for local market intelligence using the configured
+    environment variables, while keeping the weather signal live from Open-Meteo.
     """
     now_str = datetime.now().strftime("%A, %d %B %Y")
 
     prompt = f"""
     You are a hyper-local market intelligence analyst for a "{shop_category}" located in "{store_location}" on {now_str}.
-    Use Google Search to gather real, current local information across these 4 areas:
+    Give practical retail advice for this region across these 4 areas:
 
-    1. Dynamic Mandi Prices & Wholesale Trends (Based on Category: "{shop_category}"):
-       - Dynamically pick the top 4 to 5 fast-moving wholesale commodities/items that a "{shop_category}" buys from the local mandi or wholesale market in/near {store_location}.
-       - Find their current wholesale/mandi price, recent trend (PRICE_DROP, PRICE_SPIKE, or STABLE), and whether the shopkeeper should stock up today.
-    2. Civic Outages:
-       - Any scheduled or recent power cuts, electricity feeder maintenance, water supply shutdowns, or road/drainage work in or around {store_location}.
-    3. Protests, Bandhs & Traffic Disruptions:
-       - Any local protests, dharnas, rallies, strikes/bandhs, or major traffic diversions affecting street footfall in {store_location}.
-    4. Festivals & Local Demand Radar:
-       - Any upcoming local festivals, auspicious days, temple events, or payday surges in the next 7 days in {store_location}, and what specific items a "{shop_category}" should stock for it.
+    1. Dynamic Mandi Prices & Wholesale Trends (Based on Category: "{shop_category}")
+    2. Civic Outages and local disruptions
+    3. Protests, Bandhs & Traffic Disruptions
+    4. Festivals & Local Demand Radar
 
     Return ONLY a valid raw JSON object (no markdown fences) with this exact structure:
     {{
@@ -173,35 +170,31 @@ async def _run_sub_llm_grounded_intelligence(store_location: str, shop_category:
     """
 
     try:
-        response = await genai_client.aio.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                tools=[types.Tool(google_search=types.GoogleSearch())],
-                temperature=0.1,
-            ),
+        if sarvam_client is None:
+            raise ValueError("SARVAM_API_KEY is not configured.")
+
+        response = await sarvam_client.chat.completions_v2(
+            model=os.getenv("SARVAM_MODEL", "sarvam-105b-conversations"),
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
         )
 
-        raw_text = (response.text or "{}").strip()
+        raw_text = "{}"
+        if response and getattr(response, "choices", None):
+            message = response.choices[0].message
+            raw_text = (message.content or "{}").strip()
+
         if raw_text.startswith("```"):
             raw_text = raw_text.split("```")[1]
             if raw_text.startswith("json"):
                 raw_text = raw_text[4:].strip()
 
         parsed = json.loads(raw_text)
-
-        # Attach live search citations
-        sources = []
-        if response.candidates and response.candidates[0].grounding_metadata:
-            chunks = response.candidates[0].grounding_metadata.grounding_chunks or []
-            for c in chunks:
-                if c.web and c.web.title:
-                    sources.append({"title": c.web.title, "uri": c.web.uri})
-        parsed["grounded_sources"] = sources[:5]
+        parsed.setdefault("grounded_sources", [])
         return parsed
 
     except Exception as e:
-        logfire.error("Sub-LLM Grounding failed", error=str(e))
+        logfire.error("Sarvam market intelligence failed", error=str(e))
         return {
             "dynamically_selected_items": ["Onion", "Tomato", "Sugar", "Edible Oil"],
             "mandi_prices_and_trends": [],
@@ -278,6 +271,12 @@ async def compute_and_cache_env_intelligence(
             row.payload_json = json.dumps(payload)
             row.updated_at = now_utc
         db.commit()
+        logfire.info(
+            "Environment intelligence cache written",
+            cache_key=cache_key,
+            store_location=store_location,
+            database_url=APP_DB_URL,
+        )
     finally:
         db.close()
 
@@ -327,7 +326,7 @@ async def shop_env_intelligence(
     force_live_refresh: bool = False,
 ) -> Dict[str, Any]:
     """
-    Tool called by the main Voice Agent (`gemini-3.8-live`).
+    Tool called by the main Sarvam voice agent.
     Instantly returns the latest 4-hour cached output from the background Sub-LLM.
     If the cache is older than 4 hours or missing, triggers a live refresh automatically.
     """
@@ -349,6 +348,12 @@ async def shop_env_intelligence(
             if row and (now_utc - row.updated_at) < max_age:
                 payload = json.loads(row.payload_json)
                 _MEMORY_CACHE[cache_key] = {"updated_at": row.updated_at, "payload": payload}
+                logfire.info(
+                    "Environment intelligence cache hit",
+                    cache_key=cache_key,
+                    store_location=store_location,
+                    database_url=APP_DB_URL,
+                )
                 return payload
         finally:
             db.close()
@@ -360,30 +365,34 @@ async def shop_env_intelligence(
     )
 
 
-SHOP_ENV_TOOL_DECLARATION = types.FunctionDeclaration(
-    name="shop_env_intelligence",
-    description=(
-        "Fetches local weather, dynamic category-specific mandi wholesale prices & trends, "
-        "civic outages (power/water cuts), protests/traffic disruptions, and upcoming festivals "
-        "for the merchant's store location. Backed by a 4-hour pre-computed intelligence cache for instant response."
-    ),
-    behavior="NON_BLOCKING",
-    parameters=types.Schema(
-        type="OBJECT",
-        properties={
-            "store_location": types.Schema(
-                type="STRING",
-                description="The merchant's registered store location (e.g., 'Gachibowli, Hyderabad, Telangana').",
-            ),
-            "shop_category": types.Schema(
-                type="STRING",
-                description="The merchant's store category (e.g., 'Kirana & General Store', 'Vegetable Vendor', 'Bakery & Tea Stall') used to dynamically select mandi items.",
-            ),
+SHOP_ENV_TOOL_DECLARATION = {
+    "type": "function",
+    "function": {
+        "name": "shop_env_intelligence",
+        "description": (
+            "Fetches local weather, dynamic category-specific mandi wholesale prices & trends, "
+            "civic outages, protests, traffic disruptions, and upcoming festivals for the merchant's store location."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "store_location": {
+                    "type": "string",
+                    "description": "The merchant's registered store location.",
+                },
+                "shop_category": {
+                    "type": "string",
+                    "description": "The merchant's store category used to select dynamic mandi items.",
+                },
+            },
+            "required": ["store_location"],
         },
-        required=["store_location"],
-    ),
-)
+    },
+}
+
+get_shop_environment_intelligence = shop_env_intelligence
 
 SHOP_ENV_TOOL_MAPPING = {
     "shop_env_intelligence": shop_env_intelligence,
+    "get_shop_environment_intelligence": get_shop_environment_intelligence,
 }

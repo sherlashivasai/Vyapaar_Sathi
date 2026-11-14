@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from typing import Any
-from pydantic import Field, BaseModel
+from typing import Any, Optional
+
+import logfire
 import pandas as pd
-from typing import Optional
 from langchain_core.tools import tool
+from pydantic import BaseModel, Field
 from sqlalchemy import create_engine
+
+from src.db import APP_DB_URL
 
 class ExecuteDataAnalysisInput(BaseModel):
     """
@@ -25,9 +28,9 @@ class DataAnalysisOutput(BaseModel):
     summary: str = Field(description="Short overview how it got the output.")
     
 
-DB_URL = "sqlite:///payment_data.db"
+DB_URL = APP_DB_URL
 TABLE_NAME = "merchant_settlement_reports"
-engine = create_engine(DB_URL)
+engine = create_engine(DB_URL, connect_args={"check_same_thread": False})
 
 
 @tool
@@ -53,6 +56,13 @@ def execute_data_analysis(python_code: ExecuteDataAnalysisInput) -> DataAnalysis
         "DB_URL": DB_URL,
     }
 
+    logfire.info(
+        "Executing SQL analytics workflow",
+        table_name=TABLE_NAME,
+        database_url=DB_URL,
+        query_preview=str(python_code)[:180],
+    )
+
     try:
         compiled = compile(python_code, "<execute_data_analysis>", "exec")
         exec(compiled, namespace, namespace)
@@ -74,6 +84,7 @@ def execute_data_analysis(python_code: ExecuteDataAnalysisInput) -> DataAnalysis
 
         return "Analysis executed successfully."
     except Exception as exc:  # pragma: no cover - tool safety path
+        logfire.exception("SQL analytics workflow failed", table_name=TABLE_NAME, database_url=DB_URL)
         return f"Error executing analysis: {type(exc).__name__}: {exc}"
 
 
