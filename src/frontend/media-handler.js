@@ -1,223 +1,206 @@
-/**
- * MediaHandler: Manages Audio/Video capture and playback
- */
 class MediaHandler {
   constructor() {
     this.audioContext = null;
-    this.mediaStream = null;
+    this.audioStream = null;
+    this.audioSource = null;
     this.audioWorkletNode = null;
+    this.muteGain = null;
     this.videoStream = null;
     this.videoInterval = null;
-    this.nextStartTime = 0;
     this.scheduledSources = [];
+    this.nextStartTime = 0;
     this.isRecording = false;
     this.videoCanvas = document.createElement("canvas");
-    this.canvasCtx = this.videoCanvas.getContext("2d");
+    this.canvasContext = this.videoCanvas.getContext("2d");
   }
 
-  async initializeAudio() {
-    if (!this.audioContext) {
-      this.audioContext = new (window.AudioContext ||
-        window.webkitAudioContext)();
-      await this.audioContext.audioWorklet.addModule(
-        "/static/pcm-processor.js"
-      );
-    }
+  async preparePlayback() {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) throw new Error("Audio playback is not supported.");
+    if (!this.audioContext) this.audioContext = new AudioContextClass();
     if (this.audioContext.state === "suspended") {
       await this.audioContext.resume();
     }
   }
 
   async startAudio(onAudioData) {
-    await this.initializeAudio();
+    await this.preparePlayback();
+    await this.audioContext.audioWorklet.addModule("/static/pcm-processor.js");
 
-    try {
-      this.mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-      });
-      const source = this.audioContext.createMediaStreamSource(
-        this.mediaStream
-      );
-      this.audioWorkletNode = new AudioWorkletNode(
-        this.audioContext,
-        "pcm-processor"
-      );
+    this.audioStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
 
-      this.audioWorkletNode.port.onmessage = (event) => {
-        if (this.isRecording) {
-          const downsampled = this.downsampleBuffer(
-            event.data,
-            this.audioContext.sampleRate,
-            16000
-          );
-          const pcm16 = this.convertFloat32ToInt16(downsampled);
-          onAudioData(pcm16);
-        }
-      };
+    this.audioSource = this.audioContext.createMediaStreamSource(this.audioStream);
+    this.audioWorkletNode = new AudioWorkletNode(
+      this.audioContext,
+      "pcm-processor",
+      { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1 },
+    );
+    this.muteGain = this.audioContext.createGain();
+    this.muteGain.gain.value = 0;
+    this.audioSource.connect(this.audioWorkletNode);
+    this.audioWorkletNode.connect(this.muteGain);
+    this.muteGain.connect(this.audioContext.destination);
 
-      source.connect(this.audioWorkletNode);
-      // Mute local feedback
-      const muteGain = this.audioContext.createGain();
-      muteGain.gain.value = 0;
-      this.audioWorkletNode.connect(muteGain);
-      muteGain.connect(this.audioContext.destination);
-
-      this.isRecording = true;
-    } catch (e) {
-      console.error("Error starting audio:", e);
-      throw e;
-    }
+    this.audioWorkletNode.port.onmessage = ({ data }) => {
+      if (!this.isRecording || !data?.length) return;
+      const downsampled = this.downsample(data, this.audioContext.sampleRate, 16000);
+      onAudioData(this.toPCM16(downsampled));
+    };
+    this.isRecording = true;
   }
 
   stopAudio() {
     this.isRecording = false;
-    if (this.mediaStream) {
-      this.mediaStream.getTracks().forEach((t) => t.stop());
-      this.mediaStream = null;
-    }
-    if (this.audioWorkletNode) {
-      this.audioWorkletNode.disconnect();
-      this.audioWorkletNode = null;
-    }
+    this.audioWorkletNode?.port.close();
+    this.audioWorkletNode?.disconnect();
+    this.audioSource?.disconnect();
+    this.muteGain?.disconnect();
+    this.audioStream?.getTracks().forEach((track) => track.stop());
+    this.audioWorkletNode = null;
+    this.audioSource = null;
+    this.muteGain = null;
+    this.audioStream = null;
   }
 
-  async startVideo(videoElement, onFrame) {
-    try {
-      this.videoStream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-      });
-      videoElement.srcObject = this.videoStream;
+  async startVideo(mode, videoElement, onFrame, onEnded) {
+    this.stopVideo(videoElement);
+    this.videoStream =
+      mode === "screen"
+        ? await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })
+        : await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
 
-      this.videoInterval = setInterval(() => {
-        this.captureFrame(videoElement, onFrame);
-      }, 1000); // 1 FPS
-    } catch (e) {
-      console.error("Error starting video:", e);
-      throw e;
-    }
-  }
+    videoElement.srcObject = this.videoStream;
+    await videoElement.play();
 
-  async startScreen(videoElement, onFrame, onEnded) {
-    try {
-      this.videoStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-      });
-      videoElement.srcObject = this.videoStream;
-
-      // Handle stream ending (e.g. user clicks "Stop sharing" in browser UI)
-      this.videoStream.getVideoTracks()[0].onended = () => {
+    const videoTrack = this.videoStream.getVideoTracks()[0];
+    videoTrack.addEventListener(
+      "ended",
+      () => {
         this.stopVideo(videoElement);
-        if (onEnded) onEnded();
-      };
+        onEnded?.();
+      },
+      { once: true },
+    );
 
-      this.videoInterval = setInterval(() => {
-        this.captureFrame(videoElement, onFrame);
-      }, 1000); // 1 FPS
-    } catch (e) {
-      console.error("Error starting screen share:", e);
-      throw e;
-    }
+    this.videoInterval = window.setInterval(() => {
+      const frame = this.captureFrame(videoElement);
+      if (frame) onFrame(frame);
+    }, 2000);
   }
 
   stopVideo(videoElement) {
-    if (this.videoStream) {
-      this.videoStream.getTracks().forEach((t) => t.stop());
-      this.videoStream = null;
-    }
-    if (this.videoInterval) {
-      clearInterval(this.videoInterval);
+    if (this.videoInterval !== null) {
+      window.clearInterval(this.videoInterval);
       this.videoInterval = null;
     }
-    if (videoElement) {
-      videoElement.srcObject = null;
-    }
+    this.videoStream?.getTracks().forEach((track) => track.stop());
+    this.videoStream = null;
+    if (videoElement) videoElement.srcObject = null;
   }
 
-  captureFrame(videoElement, onFrame) {
-    if (!this.videoStream) return;
-    this.videoCanvas.width = 640;
-    this.videoCanvas.height = 480;
-    this.canvasCtx.drawImage(videoElement, 0, 0, 640, 480);
-    const base64 = this.videoCanvas.toDataURL("image/jpeg", 0.7).split(",")[1];
-    onFrame(base64);
+  captureFrame(videoElement) {
+    if (
+      !this.videoStream ||
+      videoElement.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
+      !this.canvasContext
+    ) {
+      return null;
+    }
+
+    const sourceWidth = videoElement.videoWidth;
+    const sourceHeight = videoElement.videoHeight;
+    if (!sourceWidth || !sourceHeight) return null;
+
+    const scale = Math.min(1, 640 / sourceWidth, 480 / sourceHeight);
+    this.videoCanvas.width = Math.round(sourceWidth * scale);
+    this.videoCanvas.height = Math.round(sourceHeight * scale);
+    this.canvasContext.drawImage(
+      videoElement,
+      0,
+      0,
+      this.videoCanvas.width,
+      this.videoCanvas.height,
+    );
+    return this.videoCanvas.toDataURL("image/jpeg", 0.65).split(",")[1];
   }
 
   playAudio(arrayBuffer) {
-    if (!this.audioContext) return;
+    if (!this.audioContext || !(arrayBuffer instanceof ArrayBuffer)) return;
     if (this.audioContext.state === "suspended") {
-      this.audioContext.resume();
+      this.audioContext.resume().catch((error) => {
+        console.error("Could not resume audio playback:", error);
+      });
     }
 
-    const pcmData = new Int16Array(arrayBuffer);
-    const float32Data = new Float32Array(pcmData.length);
-    for (let i = 0; i < pcmData.length; i++) {
-      float32Data[i] = pcmData[i] / 32768.0;
+    const sampleCount = Math.floor(arrayBuffer.byteLength / Int16Array.BYTES_PER_ELEMENT);
+    if (!sampleCount) return;
+    const pcm = new Int16Array(arrayBuffer, 0, sampleCount);
+    const audioBuffer = this.audioContext.createBuffer(1, sampleCount, 24000);
+    const channel = audioBuffer.getChannelData(0);
+    for (let index = 0; index < sampleCount; index += 1) {
+      channel[index] = pcm[index] / 32768;
     }
-
-    const buffer = this.audioContext.createBuffer(1, float32Data.length, 24000);
-    buffer.getChannelData(0).set(float32Data);
 
     const source = this.audioContext.createBufferSource();
-    source.buffer = buffer;
+    source.buffer = audioBuffer;
     source.connect(this.audioContext.destination);
-
-    const now = this.audioContext.currentTime;
-    this.nextStartTime = Math.max(now, this.nextStartTime);
+    this.nextStartTime = Math.max(
+      this.nextStartTime,
+      this.audioContext.currentTime,
+    );
     source.start(this.nextStartTime);
-    this.nextStartTime += buffer.duration;
-
+    this.nextStartTime += audioBuffer.duration;
     this.scheduledSources.push(source);
     source.onended = () => {
-      const idx = this.scheduledSources.indexOf(source);
-      if (idx > -1) this.scheduledSources.splice(idx, 1);
+      this.scheduledSources = this.scheduledSources.filter(
+        (scheduled) => scheduled !== source,
+      );
     };
   }
 
   stopAudioPlayback() {
-    this.scheduledSources.forEach((s) => {
+    for (const source of this.scheduledSources) {
       try {
-        s.stop();
-      } catch (e) {}
-    });
+        source.stop();
+      } catch {
+        // A source may already have finished.
+      }
+    }
     this.scheduledSources = [];
     if (this.audioContext) {
       this.nextStartTime = this.audioContext.currentTime;
     }
   }
 
-  // Utils
-  downsampleBuffer(buffer, sampleRate, outSampleRate) {
-    if (outSampleRate === sampleRate) return buffer;
-    const ratio = sampleRate / outSampleRate;
-    const newLength = Math.round(buffer.length / ratio);
-    const result = new Float32Array(newLength);
-    let offsetResult = 0;
-    let offsetBuffer = 0;
-    while (offsetResult < result.length) {
-      const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
-      let accum = 0,
-        count = 0;
-      for (
-        let i = offsetBuffer;
-        i < nextOffsetBuffer && i < buffer.length;
-        i++
-      ) {
-        accum += buffer[i];
-        count++;
+  downsample(buffer, sampleRate, targetRate) {
+    if (targetRate >= sampleRate) return buffer;
+    const ratio = sampleRate / targetRate;
+    const output = new Float32Array(Math.floor(buffer.length / ratio));
+    for (let outputIndex = 0; outputIndex < output.length; outputIndex += 1) {
+      const start = Math.floor(outputIndex * ratio);
+      const end = Math.min(Math.floor((outputIndex + 1) * ratio), buffer.length);
+      let sum = 0;
+      for (let inputIndex = start; inputIndex < end; inputIndex += 1) {
+        sum += buffer[inputIndex];
       }
-      result[offsetResult] = accum / count;
-      offsetResult++;
-      offsetBuffer = nextOffsetBuffer;
+      output[outputIndex] = sum / Math.max(1, end - start);
     }
-    return result;
+    return output;
   }
 
-  convertFloat32ToInt16(buffer) {
-    let l = buffer.length;
-    const buf = new Int16Array(l);
-    while (l--) {
-      buf[l] = Math.min(1, Math.max(-1, buffer[l])) * 0x7fff;
+  toPCM16(samples) {
+    const pcm = new Int16Array(samples.length);
+    for (let index = 0; index < samples.length; index += 1) {
+      const sample = Math.max(-1, Math.min(1, samples[index]));
+      pcm[index] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
     }
-    return buf.buffer;
+    return pcm.buffer;
   }
 }

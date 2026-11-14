@@ -1,86 +1,133 @@
-# Merchant AI
+# Merchant AI — Vyapar Saathi
 
-A real-time, multimodal merchant assistant built with FastAPI and the Saarvam AI voice stack. The browser app supports live audio conversations, typed messages, and optional camera or screen input. The project also includes utilities for loading and analyzing merchant settlement reports.
+Vyapar Saathi is a voice-first business assistant prototype for a small merchant. It connects a browser conversation to Gemini Live and gives the assistant a small set of tools for checking a customer khata, summarizing settlement data, and returning weather plus clearly qualified local retail suggestions.
 
-## Features
+## Architecture
 
-- Low-latency, two-way voice conversations through a browser.
-- Optional text, camera, and screen-sharing input.
-- A browser disconnect control that ends the live voice session.
-- CSV and PDF settlement-report ingestion into a local SQLite database.
-- A data-analysis tool for querying settlement data.
+```mermaid
+flowchart LR
+    Browser["Browser UI<br/>HTML, CSS, JavaScript"] <-->|"WebSocket: text, PCM audio,<br/>image snapshots and events"| API["FastAPI<br/>main.py"]
+    API <--> Agent["Gemini Live session<br/>src/voice_agent.py"]
+    Agent --> Tools["Tool registry<br/>main.py"]
+    Tools --> Khata["Khata ledger"]
+    Tools --> Analysis["Settlement analytics"]
+    Tools --> Environment["Environment intelligence"]
+    Khata --> DB[("SQLite<br/>vyapar_saathi.db")]
+    Analysis --> DB
+    Environment --> DB
+    Ingestion["CSV / PDF ingestion"] --> DB
+    Environment --> Weather["Open-Meteo<br/>weather + geocoding"]
+    Environment -. "generated suggestions" .-> Gemini["Gemini 3.5 Flash"]
+```
 
-## Requirements
+### Request flow
+
+1. The browser loads the page at `/` and static files from `/static`.
+2. **Connect assistant** opens `/ws`. Text is sent as JSON; microphone audio is sent as 16 kHz PCM; optional camera or screen sharing sends JPEG snapshots.
+3. FastAPI starts a Gemini Live session. It streams audio, transcripts, and tool events back to the browser.
+4. Gemini can call the registered tools:
+   - **Khata:** log, check, or update customer credit. Due and overdue accounts are returned as data; the app does not send reminders.
+   - **Settlement analysis:** run a summary, daily totals, instrument comparison, or fees-and-taxes analysis.
+   - **Local context:** fetch current weather and use Gemini 3.5 Flash for general suggestions. Results are cached in memory and SQLite for up to four hours.
+5. SQLAlchemy stores settlement reports, khata entries, and environment cache records in the project-root `vyapar_saathi.db` database.
+
+At startup, the app initializes the database, seeds missing demo khata rows, and starts the environment cache refresh task.
+
+## Key features
+
+- Browser chat using text or microphone audio, with streamed voice responses.
+- Optional camera and screen sharing for visual context.
+- Khata ledger actions: `LOG`, `CHECK`, and `UPDATE`, including due-date information.
+- Settlement CSV/PDF ingestion with duplicate transaction keys skipped.
+- Four predefined settlement analyses: `summary`, `daily_totals`, `by_instrument`, and `fees_and_taxes`.
+- Current weather from Open-Meteo and Gemini 3.5 Flash-generated retail suggestions, cached for four hours.
+- Structured application and database logging through Logfire.
+
+## Run locally
+
+### Requirements
 
 - Python 3.13 or newer.
-- A Saarvam AI API key in `.env`.
-- A modern browser with microphone access. Camera and screen sharing are optional.
-- `uv` is recommended for installing the locked project dependencies.
+- [`uv`](https://docs.astral.sh/uv/) for dependency and environment management.
+- A Gemini API key.
+- A modern browser. Microphone and camera access require localhost or HTTPS and browser permission.
 
-## Setup
+### Install and configure
 
-1. Clone the repository and change into its directory.
-2. Install dependencies:
+From the repository root:
 
-   ```powershell
-   uv sync
-   ```
+```powershell
+uv sync
+```
 
-3. Create a `.env` file in the project root and set your Saarvam AI credentials:
+Create a `.env` file in the repository root:
 
-   ```dotenv
-   SARVAM_API_KEY=your_saarvam_api_key
-   SARVAM_MODEL=sarvam-105b-conversations
-   STT=saaras:v4
-   TTS=bulbul:v4-flash
-   SARVAM_TTS_SPEAKER=allie
-   ```
+```dotenv
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_LIVE_MODEL=gemini-3.8-live
+GEMINI_INTELLIGENCE_MODEL=gemini-3.5-flash
+```
 
-4. Start the server from the project root:
+Keep real credentials private; do not commit `.env`.
 
-   ```powershell
-   uv run uvicorn main:app --host 0.0.0.0 --port 8000
-   ```
+### Load settlement reports
 
-5. Open [http://localhost:8000](http://localhost:8000), select **Connect**, and grant microphone access. Start the microphone to speak. Camera, screen sharing, and typed messages are available in the connected interface.
-
-## Settlement data
-
-Settlement CSV files are in `data/`. The ingestion utility reads CSV or PDF reports that match the expected settlement schema and inserts them into the shared SQLite database while skipping duplicate transaction keys.
-
-Run the bundled CSV ingestion workflow from the project root:
+The app creates the database tables and seeds demo khata data at startup. To load the bundled settlement CSV files before starting the app:
 
 ```powershell
 uv run python -m src.data_ingestion
 ```
 
-All settlement, khata, and environment-intelligence tables are stored in the shared `vyapar_saathi.db` database at the repository root. The backend also emits structured Logfire traces for database writes, cache refreshes, and key merchant operations so the database can be inspected and monitored in one place.
+The ingestion utility also supports individual CSV and PDF inputs through `DataIngestion.ingest_to_sql(file_path)`. Inputs must match the settlement schema defined in `src/models.py`.
 
-## Reusable prototype demo data
-
-The sample merchant profile and sample khata records are kept in [src/demo_data.py](src/demo_data.py), separate from the live voice and tool logic. The app seeds missing sample ledger rows at startup; seeding is idempotent and uses the demo merchant ID consistently. To seed the same records manually, run:
+### Start the app
 
 ```powershell
-uv run python -m src.demo_data
+uv run uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-The demo profile is illustrative, and its loan-limit value is not a real eligibility result.
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000). Select **Connect assistant** to open a session. Text chat works after connecting; use **Start microphone** for voice. Camera and screen sharing are optional.
 
-## Project layout
+To run the regression tests:
+
+```powershell
+uv run python -m unittest discover -s tests -v
+```
+
+## MVP scope
+
+The MVP demonstrates a single merchant’s core assistant workflow:
+
+1. Connect in the browser and ask a business question by voice or text.
+2. Check or update sample customer credit in the khata ledger.
+3. Ask for supported settlement totals and comparisons after importing report data.
+4. Request current weather and cautious, general stocking suggestions for the merchant’s location.
+
+### Current boundaries
+
+- The app uses one configured demo merchant profile and has no authentication or merchant onboarding.
+- Settlement analysis is intentionally limited to the four predefined operations; it does not run arbitrary user-supplied code.
+- Open-Meteo supplies weather. Gemini 3.5 Flash suggestions do not use live search, so mandi prices, civic alerts, disruptions, and events are **not independently verified**.
+- Khata due notifications are returned in the conversation; no SMS, payment links, or reminders are sent.
+- Camera and screen input provide visual context only; they do not enable a separate OCR or document-ingestion workflow.
+- Demo loan-limit data is illustrative and is not an eligibility result.
+- This is a local prototype, not a production-ready multi-merchant or payment-processing system.
+
+## Repository layout
 
 ```text
-main.py                         FastAPI app and browser WebSocket
-src/db.py                       Shared SQLite engine and schema initialization
-src/models.py                   Central ORM model definitions
-src/demo_data.py                Reusable prototype merchant and ledger fixtures
-src/voice_agent_sarvam.py       Saarvam voice session and event handling
-src/tools/                      Settlement ingestion and analysis utilities
-src/frontend/                   Browser interface and media client
-data/                           Settlement report CSV inputs
+main.py                              FastAPI app, WebSocket, tool registry
+src/voice_agent.py                   Gemini Live session and event streaming
+src/prompts.py                       Assistant behavior and tool instructions
+src/db.py                            SQLite engine and schema initialization
+src/models.py                        Khata, environment-cache, settlement models
+src/demo_data.py                     Demo merchant profile and sample khata rows
+src/data_ingestion.py                CSV/PDF settlement ingestion
+src/tools/execute_data_analysis.py   Predefined settlement analyses
+src/tools/khata_ledger.py            Customer credit ledger
+src/tools/get_shop_environment_intelligence.py
+                                     Weather lookup, Gemini suggestions, cache
+src/frontend/                        Browser UI, WebSocket client, media handling
+data/                                Bundled settlement CSV reports
+tests/                               Backend regression tests
 ```
-
-## Notes
-
-- Run commands from the repository root; the app serves frontend assets from `src/frontend`.
-- Keep API keys in `.env`; do not commit secrets.
-- The browser application requires the Saarvam credentials from `.env`.

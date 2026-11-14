@@ -12,8 +12,8 @@ from src.models import KhataLedger
 
 DEMO_MERCHANT_PROFILE: dict[str, Any] = {
     "merchant_id": "M123456",
-    "merchant_name": "Rajaiah",
-    "shop_name": "Rajaiah Kirana Store",
+    "merchant_name": "Mahesh",
+    "shop_name": "mahesh Kirana Store",
     "shop_category": "Kirana & General Store",
     "items_available": [
         "Rice", "Wheat Flour", "Sugar", "Cooking Oil", "Onions",
@@ -21,8 +21,8 @@ DEMO_MERCHANT_PROFILE: dict[str, Any] = {
         "Snacks", "Biscuits", "Soft Drinks",
     ],
     "store_location": "vegetable market, Mancherial, Telangana",
-    "lat": 18.8756,
-    "lon": 79.4591,
+    "lat": 18.8792,
+    "lon": 79.4491,
     "preferred_language": "Telglish (Telugu + simple English)",
     "existing_customers": ["Raju", "Lakshmi", "Suresh"],
     "shadow_loan_limit": 50000,

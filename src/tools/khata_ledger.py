@@ -1,4 +1,5 @@
 import difflib
+import math
 from datetime import date, datetime
 from typing import Dict, Any, Optional, List
 
@@ -21,8 +22,21 @@ def _parse_date(date_str: Optional[str], fallback: Optional[date] = None) -> Opt
         return fallback
     try:
         return datetime.strptime(date_str.strip(), "%Y-%m-%d").date()
-    except ValueError:
-        return fallback
+    except ValueError as exc:
+        raise ValueError(f"Invalid date '{date_str}'. Use YYYY-MM-DD.") from exc
+
+
+def _parse_amount(amount: float, *, allow_zero: bool = False) -> float:
+    try:
+        parsed_amount = float(amount)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Amount must be a finite number.") from exc
+
+    if not math.isfinite(parsed_amount) or parsed_amount < 0:
+        raise ValueError("Amount must be a finite, non-negative number.")
+    if not allow_zero and parsed_amount == 0:
+        raise ValueError("Amount must be greater than zero.")
+    return parsed_amount
 
 
 def _find_customer(db, merchant_id: str, spoken_name: str) -> Optional[KhataLedger]:
@@ -192,14 +206,14 @@ async def manage_khata_ledger(
         # ACTION 2: LOG (Add new credit entry or add to existing customer's balance)
         # ----------------------------------------------------------------------
         if act == "LOG":
-            if amount is None or float(amount) <= 0:
+            if amount is None:
                 return {
                     "status": "error",
                     "retryable": False,
                     "message": "A positive 'amount' is required to log credit.",
                 }
 
-            added_amt = float(amount)
+            added_amt = _parse_amount(amount)
             if not cust:
                 cust = KhataLedger(
                     merchant_id=merchant_id,
@@ -254,8 +268,8 @@ async def manage_khata_ledger(
 
             if phone_no is not None:
                 cust.phone_no = phone_no
-            if amount is not None and float(amount) >= 0:
-                cust.amount = float(amount)
+            if amount is not None:
+                cust.amount = _parse_amount(amount, allow_zero=True)
                 # If balance reaches 0, clear promised_return_date so notifications stop
                 if cust.amount == 0:
                     cust.promised_return_date = None
@@ -293,6 +307,7 @@ async def manage_khata_ledger(
         }
 
     except Exception as exc:
+        db.rollback()
         logfire.exception(
             "Khata ledger action failed",
             action=action,
@@ -341,8 +356,3 @@ KHATA_TOOL_DECLARATION = {
 }
 
 khata_ledger = manage_khata_ledger
-
-KHATA_TOOL_MAPPING = {
-    "manage_khata_ledger": manage_khata_ledger,
-    "khata_ledger": khata_ledger,
-}

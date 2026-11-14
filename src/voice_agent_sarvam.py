@@ -10,8 +10,8 @@ import logfire
 from sarvamai import AsyncSarvamAI
 from sarvamai.types.realtime_audio_input import RealtimeAudioInput
 
-from demo_data import DEMO_MERCHANT_PROFILE
-from prompts import build_merchant_system_prompt
+from .demo_data import DEMO_MERCHANT_PROFILE
+from .prompts import build_merchant_system_prompt
 
 
 class SarvamLive:

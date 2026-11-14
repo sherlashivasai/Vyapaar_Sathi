@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import Column, Date, DateTime, Float, Integer, Numeric, String, Text
 
@@ -45,7 +45,11 @@ class EnvIntelligenceCache(Base):
     store_location = Column(String, index=True)
     shop_category = Column(String)
     payload_json = Column(Text, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
+        nullable=False,
+    )
 
 
 class MerchantSettlementReport(Base):

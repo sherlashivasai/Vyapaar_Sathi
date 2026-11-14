@@ -1,99 +1,194 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Gemini Live API Demo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="A voice-first business assistant for merchant payments, settlements, and khata."
+    />
+    <meta name="theme-color" content="#f5f7f4" />
+    <title>Vyapar Saathi | Merchant assistant</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="/static/style.css" />
   </head>
   <body>
-    <div class="container">
-      <header>
-        <h1>Gemini Live API Demo</h1>
-        <div style="display: flex; gap: 10px; align-items: center">
-          <div id="status" class="status disconnected">Disconnected</div>
-          <div id="interaction-status" class="interaction-status hidden"></div>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Vyapar Saathi home">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none">
+              <path d="M6 9.5h20L16 25 6 9.5Z" fill="currentColor" />
+              <path d="M6 9.5 16 16l10-6.5" stroke="#f5f7f4" stroke-width="2" />
+            </svg>
+          </span>
+          <span class="brand-copy">
+            <strong>vyapar saathi</strong>
+            <small>YOUR BUSINESS, IN GOOD HANDS</small>
+          </span>
+        </a>
+
+        <div class="topbar-right">
+          <span class="prototype-tag">MERCHANT DESK</span>
+          <div id="connection-status" class="connection-status" role="status">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="status-text">Offline</span>
+          </div>
         </div>
       </header>
 
       <main>
-        <div class="auth-section" id="auth-section">
-          <div
-            class="description-box"
-            style="
-              margin-bottom: 20px;
-              padding: 15px;
-              background: #f5f5f5;
-              border-radius: 8px;
-              text-align: left;
-            "
-          >
-            <h3>Features Enabled:</h3>
-            <ul style="margin: 10px 0 20px 20px">
-              <li>
-                <strong>Native Audio:</strong> Low latency voice interaction
-              </li>
-              <li>
-                <strong>Multilingual:</strong> Speak in different languages
-              </li>
-
-            </ul>
-            <p>
-              <em
-                >Note: When you connect, the app sends a text message to Gemini
-                instructing it to introduce itself and these features.</em
-              >
+        <section class="welcome-row">
+          <div>
+            <p class="eyebrow"><span class="eyebrow-line"></span> A calmer way to run your shop</p>
+            <h1>Good business<br /><span>starts with a conversation.</span></h1>
+            <p class="welcome-copy">
+              Ask about settlements, customer credit, or what is happening around your store.
+              Speak naturally or type a message.
             </p>
           </div>
-          <p>Click below to connect.</p>
-          <button id="connectBtn" class="btn">Connect</button>
-        </div>
-
-        <div class="session-end-section hidden" id="session-end-section">
-          <h2>Session Ended</h2>
-          <button id="restartBtn" class="btn">Start New Session</button>
-        </div>
-
-        <div class="app-section hidden" id="app-section">
-          <div class="app-grid">
-            <div class="left-panel">
-              <div class="video-container">
-                <div id="video-placeholder">Start camera to send video</div>
-                <video id="video-preview" autoplay playsinline muted></video>
-                <canvas id="video-canvas" style="display: none"></canvas>
-              </div>
-
-              <div class="controls">
-                <button id="micBtn" class="btn icon-btn">Start Mic</button>
-                <button id="cameraBtn" class="btn icon-btn">
-                  Start Camera
-                </button>
-                <button id="screenBtn" class="btn icon-btn">
-                  Share Screen
-                </button>
-                <button id="disconnectBtn" class="btn icon-btn danger">
-                  Disconnect
-                </button>
-              </div>
-            </div>
-
-            <div class="right-panel">
-              <div class="chat-log" id="chat-log"></div>
-              <div class="input-area">
-                <input
-                  type="text"
-                  id="textInput"
-                  placeholder="Type a message..."
-                />
-                <button id="sendBtn" class="btn">Send</button>
-              </div>
-            </div>
+          <div class="welcome-note">
+            <span class="note-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M12 3.5v3m0 11v3m8.5-8.5h-3m-11 0h-3m14.01-6.01-2.12 2.12m-7.78 7.78-2.12 2.12m12.02 0-2.12-2.12m-7.78-7.78L6.39 6.39" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+                <circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.7" />
+              </svg>
+            </span>
+            <span><strong>Here when you need it.</strong><small>Your assistant is ready for a quick check-in.</small></span>
           </div>
-        </div>
+        </section>
+
+        <section class="workspace" aria-label="Merchant assistant">
+          <aside class="assistant-panel">
+            <div class="panel-topline">
+              <span class="panel-label">YOUR ASSISTANT</span>
+              <span class="secure-label"><span aria-hidden="true"></span> PRIVATE SESSION</span>
+            </div>
+
+            <div class="assistant-visual" aria-hidden="true">
+              <div class="visual-glow"></div>
+              <div class="visual-ring ring-one"></div>
+              <div class="visual-ring ring-two"></div>
+              <div class="visual-core">
+                <svg viewBox="0 0 48 48" fill="none">
+                  <path d="M24 7.5a6 6 0 0 0-6 6v11a6 6 0 0 0 12 0v-11a6 6 0 0 0-6-6Z" stroke="currentColor" stroke-width="2.2" />
+                  <path d="M12.5 22v2.5a11.5 11.5 0 0 0 23 0V22M24 36v5m-6 0h12" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+                </svg>
+              </div>
+              <span class="visual-spark spark-one"></span>
+              <span class="visual-spark spark-two"></span>
+            </div>
+
+            <div class="assistant-intro">
+              <span id="assistant-state" class="assistant-state">READY WHEN YOU ARE</span>
+              <h2>Let’s talk<br />business.</h2>
+              <p id="activity-text">Connect to ask a question or start a voice conversation.</p>
+            </div>
+
+            <div class="session-controls">
+              <button id="connect-button" class="button button-primary" type="button">
+                <span class="button-icon" aria-hidden="true">
+                  <svg viewBox="0 0 20 20" fill="none"><path d="M6.2 3.8h2.1l1 3.8-1.5 1.5a13.4 13.4 0 0 0 5.3 5.3l1.5-1.5 3.8 1v2.1a1.8 1.8 0 0 1-1.9 1.8A14 14 0 0 1 4.4 5.7a1.8 1.8 0 0 1 1.8-1.9Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                </span>
+                <span>Connect assistant</span>
+                <svg class="button-arrow" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h11m-4-4 4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+              </button>
+              <button id="disconnect-button" class="button button-danger hidden" type="button">
+                <span class="button-icon" aria-hidden="true">
+                  <svg viewBox="0 0 20 20" fill="none"><path d="m5 5 10 10M15 5 5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
+                </span>
+                <span>End session</span>
+              </button>
+              <button id="mic-button" class="button button-secondary" type="button" disabled>
+                <span class="button-icon" aria-hidden="true">
+                  <svg viewBox="0 0 20 20" fill="none"><rect x="7" y="2.5" width="6" height="10" rx="3" stroke="currentColor" stroke-width="1.5" /><path d="M4.5 9.5v1a5.5 5.5 0 0 0 11 0v-1M10 16v2m-3 0h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
+                </span>
+                <span>Start microphone</span>
+              </button>
+            </div>
+
+            <div class="share-controls">
+              <div class="share-heading">
+                <span>ADD A VISUAL</span>
+                <span class="optional-tag">OPTIONAL</span>
+              </div>
+              <div class="share-buttons">
+                <button id="camera-button" class="share-button" type="button" disabled>
+                  <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 6.5h9.5A1.5 1.5 0 0 1 14 8v7a1.5 1.5 0 0 1-1.5 1.5H3A1.5 1.5 0 0 1 1.5 15V8A1.5 1.5 0 0 1 3 6.5Z" stroke="currentColor" stroke-width="1.4" /><path d="m14 10 4.5-2.5v8L14 13" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /></svg>
+                  Camera
+                </button>
+                <button id="screen-button" class="share-button" type="button" disabled>
+                  <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2" y="2.5" width="16" height="11" rx="1.8" stroke="currentColor" stroke-width="1.4" /><path d="M7 17.5h6m-3-4v4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg>
+                  Share screen
+                </button>
+                <button id="stop-share-button" class="share-button stop-share hidden" type="button">
+                  Stop sharing
+                </button>
+              </div>
+              <div id="video-preview-wrap" class="video-preview-wrap hidden">
+                <video id="video-preview" autoplay muted playsinline></video>
+                <span id="video-preview-label">Sharing preview</span>
+              </div>
+            </div>
+
+            <p class="privacy-note">
+              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="3.2" y="7" width="9.6" height="7" rx="1.5" stroke="currentColor" stroke-width="1.2" /><path d="M5.2 7V5a2.8 2.8 0 1 1 5.6 0v2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>
+              Your microphone and camera are only used during this session.
+            </p>
+          </aside>
+
+          <section class="conversation-panel" aria-label="Conversation">
+            <div class="conversation-header">
+              <div>
+                <span class="panel-label">LIVE CONVERSATION</span>
+                <h2>Your business desk</h2>
+              </div>
+              <div class="conversation-status">
+                <span class="live-indicator" aria-hidden="true"></span>
+                <span id="conversation-status-text">Waiting to connect</span>
+              </div>
+            </div>
+
+            <div id="chat-log" class="chat-log" role="log" aria-live="polite" aria-relevant="additions text" aria-label="Conversation transcript">
+              <div id="empty-state" class="empty-state">
+                <div class="empty-art" aria-hidden="true">
+                  <span class="empty-art-line"></span>
+                  <span class="empty-art-dot"></span>
+                  <span class="empty-art-line short"></span>
+                </div>
+                <p class="empty-title">Your conversation starts here</p>
+                <p class="empty-copy">Try “How much did I collect this week?” or “Check Raju’s khata.”</p>
+              </div>
+            </div>
+
+            <div id="error-banner" class="error-banner hidden" role="alert"></div>
+
+            <form id="message-form" class="message-form">
+              <label class="sr-only" for="text-input">Write a message</label>
+              <input id="text-input" type="text" placeholder="Ask about settlements, khata, or local context…" autocomplete="off" disabled />
+              <button id="send-button" class="send-button" type="submit" disabled aria-label="Send message">
+                <svg viewBox="0 0 22 22" fill="none" aria-hidden="true"><path d="M19 3 10.5 19l-2-7.5L1 9.5 19 3Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" /><path d="m8.5 11.5 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
+              </button>
+            </form>
+            <div class="composer-hint"><span class="keyboard-key">ENTER</span> to send <span class="hint-divider">·</span> connect your microphone to speak</div>
+          </section>
+        </section>
       </main>
+
+      <footer class="page-footer">
+        <span>Built for the everyday business of your store.</span>
+        <span class="footer-divider" aria-hidden="true"></span>
+        <span>Vyapar Saathi <span id="current-year"></span></span>
+      </footer>
     </div>
+
     <script src="/static/media-handler.js"></script>
-    <script src="/static/gemini-client.js"></script>
+    <script src="/static/voice-client.js"></script>
     <script src="/static/main.js"></script>
   </body>
 </html>

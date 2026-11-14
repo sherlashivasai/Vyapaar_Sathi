@@ -1,12 +1,13 @@
 import os
 import json
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, List
 
 import httpx
 import logfire
-from sarvamai import AsyncSarvamAI
+from google import genai
+from google.genai import types
 
 from src.db import APP_DB_URL, SessionLocal
 from src.models import EnvIntelligenceCache
@@ -15,9 +16,13 @@ from src.models import EnvIntelligenceCache
 CACHE_TTL_HOURS = 4
 REFRESH_INTERVAL_SECONDS = CACHE_TTL_HOURS * 3600
 
-# Initialize Sarvam client from environment variables.
-sarvam_api_key = os.getenv("SARVAM_API_KEY")
-sarvam_client = AsyncSarvamAI(api_subscription_key=sarvam_api_key) if sarvam_api_key else None
+# Use the same Gemini API key as the live voice assistant.
+gemini_api_key = os.getenv("GEMINI_API_KEY")
+gemini_client = genai.Client(api_key=gemini_api_key) if gemini_api_key else None
+GEMINI_INTELLIGENCE_MODEL = os.getenv(
+    "GEMINI_INTELLIGENCE_MODEL",
+    "gemini-3.5-flash",
+)
 
 WMO_CODES = {
     0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
@@ -57,12 +62,13 @@ async def _fetch_open_meteo_weather(
                 params={"name": store_location.split(",")[0].strip(), "count": 1, "country": "IN"},
                 timeout=3.0,
             )
+            geo_resp.raise_for_status()
             geo_data = geo_resp.json()
             if geo_data.get("results"):
                 lat = geo_data["results"][0]["latitude"]
                 lon = geo_data["results"][0]["longitude"]
             else:
-                lat, lon = 17.4401, 78.3489  # Fallback: Gachibowli, Hyderabad
+                raise ValueError(f"Could not find coordinates for '{store_location}'.")
 
         url = "https://api.open-meteo.com/v1/forecast"
         params = {
@@ -75,6 +81,7 @@ async def _fetch_open_meteo_weather(
             "forecast_days": 2,
         }
         resp = await http_client.get(url, params=params, timeout=4.0)
+        resp.raise_for_status()
         data = resp.json()
 
         current = data.get("current", {})
@@ -110,8 +117,8 @@ async def _fetch_open_meteo_weather(
 
 async def _run_sub_llm_grounded_intelligence(store_location: str, shop_category: str) -> Dict[str, Any]:
     """
-    Runs the Sarvam chat model for local market intelligence using the configured
-    environment variables, while keeping the weather signal live from Open-Meteo.
+    Uses Gemini for cautious local retail suggestions while keeping the weather
+    signal live from Open-Meteo.
     """
     now_str = datetime.now().strftime("%A, %d %B %Y")
 
@@ -157,31 +164,29 @@ async def _run_sub_llm_grounded_intelligence(store_location: str, shop_category:
     """
 
     try:
-        if sarvam_client is None:
-            raise ValueError("SARVAM_API_KEY is not configured.")
+        if gemini_client is None:
+            raise ValueError("GEMINI_API_KEY is not configured.")
 
-        response = await sarvam_client.chat.completions_v2(
-            model=os.getenv("SARVAM_MODEL", "sarvam-105b-conversations"),
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
+        response = await gemini_client.aio.models.generate_content(
+            model=GEMINI_INTELLIGENCE_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.1,
+            ),
         )
 
-        raw_text = "{}"
-        if response and getattr(response, "choices", None):
-            message = response.choices[0].message
-            raw_text = (message.content or "{}").strip()
-
-        if raw_text.startswith("```"):
-            raw_text = raw_text.split("```")[1]
-            if raw_text.startswith("json"):
-                raw_text = raw_text[4:].strip()
-
+        raw_text = (response.text or "").strip()
+        if not raw_text:
+            raise ValueError("Gemini returned an empty market intelligence response.")
         parsed = json.loads(raw_text)
+        if not isinstance(parsed, dict):
+            raise ValueError("Gemini returned market intelligence that was not a JSON object.")
         parsed.setdefault("grounded_sources", [])
         return parsed
 
     except Exception as e:
-        logfire.error("Sarvam market intelligence failed", error=str(e))
+        logfire.error("Gemini market intelligence failed", error=str(e))
         return {
             "dynamically_selected_items": ["Onion", "Tomato", "Sugar", "Edible Oil"],
             "mandi_prices_and_trends": [],
@@ -202,8 +207,8 @@ async def _run_sub_llm_grounded_intelligence(store_location: str, shop_category:
 async def compute_and_cache_env_intelligence(
     store_location: str = "Gachibowli, Hyderabad, Telangana",
     shop_category: str = "Kirana & General Store",
-    lat: Optional[float] = 17.4401,
-    lon: Optional[float] = 78.3489,
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     Executes the live Weather API + Sub-LLM Search Grounding in parallel and writes
@@ -218,10 +223,11 @@ async def compute_and_cache_env_intelligence(
             _run_sub_llm_grounded_intelligence(store_location, shop_category),
         )
 
-    now_utc = datetime.utcnow()
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    has_source_error = "error" in weather_data or "grounding_error" in llm_intel
     payload = {
-        "status": "ok",
-        "retryable": False,
+        "status": "partial" if has_source_error else "ok",
+        "retryable": has_source_error,
         "cache_metadata": {
             "last_refreshed_utc": now_utc.isoformat(),
             "next_refresh_utc": (now_utc + timedelta(hours=CACHE_TTL_HOURS)).isoformat(),
@@ -232,8 +238,13 @@ async def compute_and_cache_env_intelligence(
         "live_weather": weather_data,
         "local_intelligence": llm_intel,
         "message": (
-            f"Loaded live weather and generated general retail suggestions for {store_location}. "
-            "Local prices and civic events are not independently verified."
+            f"Loaded available intelligence for {store_location}. "
+            "One or more sources were unavailable; local prices and civic events are not independently verified."
+            if has_source_error
+            else (
+                f"Loaded live weather and generated general retail suggestions for {store_location}. "
+                "Local prices and civic events are not independently verified."
+            )
         ),
     }
 
@@ -313,14 +324,16 @@ async def shop_env_intelligence(
     store_location: str = "Gachibowli, Hyderabad, Telangana",
     shop_category: str = "Kirana & General Store",
     force_live_refresh: bool = False,
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
-    Tool called by the main Sarvam voice agent.
+    Tool called by the voice agent.
     Instantly returns the latest 4-hour cached output from the background Sub-LLM.
     If the cache is older than 4 hours or missing, triggers a live refresh automatically.
     """
     cache_key = _make_cache_key(store_location, shop_category)
-    now_utc = datetime.utcnow()
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     max_age = timedelta(hours=CACHE_TTL_HOURS)
 
     # 1. Check L1 In-Memory Cache (< 1ms)
@@ -351,6 +364,8 @@ async def shop_env_intelligence(
     return await compute_and_cache_env_intelligence(
         store_location=store_location,
         shop_category=shop_category,
+        lat=lat,
+        lon=lon,
     )
 
 
@@ -380,8 +395,3 @@ SHOP_ENV_TOOL_DECLARATION = {
 }
 
 get_shop_environment_intelligence = shop_env_intelligence
-
-SHOP_ENV_TOOL_MAPPING = {
-    "shop_env_intelligence": shop_env_intelligence,
-    "get_shop_environment_intelligence": get_shop_environment_intelligence,
-}

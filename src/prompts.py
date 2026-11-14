@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Dict, Any
 
 # ==============================================================================
-# 1. MASTER SYSTEM PROMPT (Saarvam voice assistant)
+# 1. MASTER SYSTEM PROMPT (Gemini Live voice assistant)
 # ==============================================================================
 
 MASTER_VOICE_SYSTEM_PROMPT = """
@@ -28,7 +28,7 @@ You are speaking in a LIVE VOICE CONVERSATION with {merchant_name}, owner of "{s
 5. LANGUAGE MIRRORING: Start in {preferred_language}. If the merchant speaks in Hinglish, Hindi, Telugu, or English, effortlessly mirror their exact language and dialect mix.
 
 ### TOOLS AND USAGE RULES
-    -execute_data_analysis: Use this tool for questions about settlement data. Supply Python/Pandas code that reads the `merchant_settlement_reports` table and prints computed findings.
+    -execute_data_analysis: Use this tool for questions about settlement data. Choose one supported analysis: summary, daily_totals, by_instrument, or fees_and_taxes.
     -khata_ledger: Use this tool to log, check, or update customer credit (udhaar) transactions. Always confirm the updated balance aloud after an action.
     -get_shop_environment_intelligence: Use this tool for live weather and general generated suggestions. Local prices and civic events are not independently verified; never present them as confirmed facts.
 
@@ -37,7 +37,7 @@ You are speaking in a LIVE VOICE CONVERSATION with {merchant_name}, owner of "{s
 Never guess, invent, or hallucinate sales figures, weather, or credit balances. Follow these exact trigger rules:
 
 1. WHEN ASKED ABOUT SETTLEMENT PERFORMANCE OR A BUSINESS SLOWDOWN:
-   - Use `execute_data_analysis` for calculations supported by the settlement report.
+   - Use `execute_data_analysis` for calculations supported by the settlement report, selecting the matching supported analysis instead of estimating numbers.
    - Use `get_shop_environment_intelligence` only for live weather and clearly qualified general suggestions.
    - Do not claim customer visit patterns or area-wide sales trends; those data sources are not implemented.
 
@@ -51,7 +51,7 @@ Never guess, invent, or hallucinate sales figures, weather, or credit balances. 
 """
 
 # =============================================================================
-# 1b. Saarvam voice behavior addendum (for asynchronous tool execution)
+# 1b. Live voice behavior addendum (for asynchronous tool execution)
 # =============================================================================
 
 VOICE_STREAM_BEHAVIOR_ADDENDUM = """
@@ -132,6 +132,18 @@ LATENCY_FILLERS = {
 }
 
 
+def _preferred_language_code(preferred_language: str) -> str:
+    if preferred_language in INBOUND_CALL_GREETINGS:
+        return preferred_language
+
+    normalized_language = preferred_language.casefold()
+    if "telugu" in normalized_language:
+        return "te-IN"
+    if "english" in normalized_language:
+        return "en-IN"
+    return "hi-IN"
+
+
 # ==============================================================================
 # 5. INITIAL INBOUND CALL GREETINGS (Zero-Screen Helpline Pickup)
 # ==============================================================================
@@ -166,6 +178,9 @@ def build_merchant_system_prompt(merchant_profile: Dict[str, Any]) -> str:
             - "preferred_language": str, preferred language of the merchant
             - "shadow_loan_limit": float, current pre-approved loan limit for the merchant
     """
+    preferred_language = merchant_profile.get("preferred_language", "hi-IN")
+    language_code = _preferred_language_code(preferred_language)
+
     return MASTER_VOICE_SYSTEM_PROMPT.format(
         merchant_id=merchant_profile.get("merchant_id", "M123456"),
         merchant_name=merchant_profile.get("merchant_name", "Ramesh"),
@@ -178,10 +193,10 @@ def build_merchant_system_prompt(merchant_profile: Dict[str, Any]) -> str:
         preferred_language=merchant_profile.get("preferred_language", "Telglish (Telugu + simple English)"),
         current_datetime=datetime.now().strftime("%A, %d %B %Y, %I:%M %p"),
         shadow_loan_limit=merchant_profile.get("shadow_loan_limit", 50000)
-    )+'here,is the example for call greeting: '+INBOUND_CALL_GREETINGS.get(merchant_profile.get("preferred_language", "hi-IN"), INBOUND_CALL_GREETINGS["hi-IN"]).format(
+    )+'here,is the example for call greeting: '+INBOUND_CALL_GREETINGS[language_code].format(
         merchant_name=merchant_profile.get("merchant_name", "Ramesh"),
         shop_name=merchant_profile.get("shop_name", "Ramesh Kirana Store")
-    )+'latency fillers: '+LATENCY_FILLERS.get(merchant_profile.get("preferred_language", "hi-IN"), LATENCY_FILLERS["hi-IN"])['DIAGNOSIS'].format(
+    )+'latency fillers: '+LATENCY_FILLERS[language_code]['DIAGNOSIS'].format(
         merchant_name=merchant_profile.get("merchant_name", "Ramesh")
     )+'for khata intent extraction ,use tool: khata_ledger , and while using this tool, use the following prompt: '+KHATA_INTENT_EXTRACTION_PROMPT.format(
         existing_customers=merchant_profile.get("existing_customers", ["Raju", "Sita", "Mohan"])
