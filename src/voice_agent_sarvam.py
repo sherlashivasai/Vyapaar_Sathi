@@ -10,25 +10,8 @@ import logfire
 from sarvamai import AsyncSarvamAI
 from sarvamai.types.realtime_audio_input import RealtimeAudioInput
 
-from .prompts import build_merchant_system_prompt
-
-merchant_profile = {
-    "merchant_id": "M123456",
-    "merchant_name": "mahesh",
-    "shop_name": "Mahesh Kirana Store",
-    "shop_category": "Kirana & General Store",
-    "items_available": [
-        "Rice", "Wheat Flour", "Sugar", "Cooking Oil", "Onions", "Potatoes",
-        "Ginger", "Garlic", "Chillies", "Spices", "Snacks", "Biscuits",
-        "Soft Drinks",
-    ],
-    "store_location": "vegetable market, Mancherial, Telangana",
-    "lat": 18.8756,
-    "lon": 79.4591,
-    "preferred_language": "Telglish (Telugu + simple English)",
-    "shadow_loan_limit": 50000,
-    "existing_customers": ["Raju", "Sita", "Mohan"],
-}
+from demo_data import DEMO_MERCHANT_PROFILE
+from prompts import build_merchant_system_prompt
 
 
 class SarvamLive:
@@ -69,7 +52,7 @@ class SarvamLive:
         self.client = AsyncSarvamAI(api_subscription_key=self.api_key)
         self.tools = [self._tool_schema(tool) for tool in (tools or [])]
         self.tool_mapping = tool_mapping or {}
-        self.system_prompt = system_prompt or build_merchant_system_prompt(merchant_profile)
+        self.system_prompt = system_prompt or build_merchant_system_prompt(DEMO_MERCHANT_PROFILE)
 
     @staticmethod
     def _tool_schema(tool: Any) -> Dict[str, Any]:

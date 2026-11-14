@@ -5,25 +5,28 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
-from functools import partial
 
 import logfire
 from dotenv import load_dotenv
+
+load_dotenv()
+logfire.configure(service_name="merchant-ai")
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from src.db import init_db
+from src.demo_data import DEMO_MERCHANT_PROFILE, seed_demo_data
 from src.voice_agent_sarvam import SarvamLive
 from src.tools.execute_data_analysis import execute_data_analysis
-from src.tools.get_shop_environment_intelligence import get_shop_environment_intelligence
+from src.tools.get_shop_environment_intelligence import (
+    get_shop_environment_intelligence,
+    start_4hour_env_refresh_scheduler,
+)
 from src.tools.khata_ledger import manage_khata_ledger
 from src.prompts import build_merchant_system_prompt
-
-# Load environment variables
-load_dotenv()
-
-logfire.configure(service_name="merchant-ai")
 
 # Configure logging - DEBUG for our modules, INFO for everything else
 logging.basicConfig(level=logging.INFO)
@@ -37,24 +40,8 @@ SARVAM_MODEL = os.getenv("SARVAM_MODEL", "sarvam-105b-conversations")
 SARVAM_STT_MODEL = os.getenv("STT", "saaras:v4")
 SARVAM_TTS_MODEL = os.getenv("TTS", "bulbul:v4-flash")
 SARVAM_TTS_SPEAKER = os.getenv("SARVAM_TTS_SPEAKER", "allie")
-ENV_REFRESH_INTERVAL_SECONDS = 4 * 3600  # 4 hours
 
-merchant_profile = {
-    "merchant_id": "M123456",
-    "merchant_name": "Rajaiah",
-    "shop_name": "Rajaiah Kirana Store",
-    "shop_category": "Kirana & General Store",
-    "items_available": [
-        "Rice", "Wheat Flour", "Sugar", "Cooking Oil", "Onions",
-        "Potatoes", "Ginger", "Garlic", "Chillies", "Spices",
-        "Snacks", "Biscuits", "Soft Drinks"
-    ],
-    "store_location": "vegetable market, Mancherial, Telangana",
-    "lat": 18.8756,
-    "lon": 79.4591,
-    "preferred_language": "Telglish (Telugu + simple English)",
-    "existing_customers": ["Raju", "Sita", "Mohan"],
-}
+merchant_profile = DEMO_MERCHANT_PROFILE
 
 
 # ==============================================================================
@@ -69,35 +56,13 @@ async def _invoke_tool_safely(func, **kwargs):
     return await loop.run_in_executor(None, lambda: func(**kwargs))
 
 
-async def start_4hour_env_refresh_scheduler():
-    """
-    Runs every 4 hours in the background to pre-fetch and cache local weather,
-    dynamic mandi trends, civic outages, protests, and festivals for Rajaiah's store.
-    """
-    while True:
-        try:
-            logger.info(
-                "Running 4-hour background environment intelligence sync for %s",
-                merchant_profile["store_location"],
-            )
-            await _invoke_tool_safely(
-                get_shop_environment_intelligence,
-                store_location=merchant_profile["store_location"],
-                shop_category=merchant_profile["shop_category"],
-            )
-        except asyncio.CancelledError:
-            logger.info("4-hour environment refresh scheduler stopped cleanly")
-            break
-        except Exception as e:
-            logger.error("4-hour environment refresh error: %s", e)
-
-        await asyncio.sleep(ENV_REFRESH_INTERVAL_SECONDS)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Start the 4-hour background LLM intelligence fetcher immediately on server boot
-    scheduler_task = asyncio.create_task(start_4hour_env_refresh_scheduler())
+    init_db()
+    seed_demo_data()
+    scheduler_task = asyncio.create_task(
+        start_4hour_env_refresh_scheduler(merchants_to_track=[merchant_profile])
+    )
     yield
     # Cleanly cancel background task on shutdown
     scheduler_task.cancel()
@@ -117,8 +82,8 @@ TOOL_DECLARATIONS = [
         "function": {
             "name": "get_shop_environment_intelligence",
             "description": (
-                "Fetches local weather, dynamic category-specific mandi wholesale prices & trends, "
-                "civic outages, protests, traffic disruptions, and upcoming festivals for the merchant's store location."
+                "Fetches live weather and generated general retail suggestions. It does not independently verify "
+                "local mandi prices, civic outages, protests, traffic disruptions, or event dates."
             ),
             "parameters": {
                 "type": "object",
@@ -169,9 +134,12 @@ TOOL_DECLARATIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "The analytical question or query to run."},
+                    "python_code": {
+                        "type": "string",
+                        "description": "Pandas code to analyze settlement data; always print findings.",
+                    },
                 },
-                "required": ["query"],
+                "required": ["python_code"],
             },
         },
     },
@@ -195,9 +163,8 @@ def build_session_tool_mapping(profile: dict) -> dict:
         kwargs.setdefault("merchant_id", profile["merchant_id"])
         return await _invoke_tool_safely(manage_khata_ledger, **kwargs)
 
-    async def _analysis_wrapper(**kwargs):
-        kwargs.setdefault("merchant_id", profile["merchant_id"])
-        return await _invoke_tool_safely(execute_data_analysis, **kwargs)
+    async def _analysis_wrapper(python_code: str):
+        return await execute_data_analysis.ainvoke({"python_code": python_code})
 
     return {
         "get_shop_environment_intelligence": _env_wrapper,
@@ -231,7 +198,7 @@ async def root():
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for Gemini Live."""
+    """WebSocket endpoint for the Saarvam voice session."""
     await websocket.accept()
     logger.info("WebSocket connection accepted for merchant: %s", merchant_profile["merchant_name"])
 

@@ -1,82 +1,16 @@
 import difflib
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Dict, Any, Optional, List
 
 import logfire
-from sqlalchemy import Column, Integer, String, Float, Date, create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
 
-from src.db import APP_DB_URL
-
-Base = declarative_base()
+from src.db import APP_DB_URL, SessionLocal
+from src.models import KhataLedger
 
 
 # ==============================================================================
 # 1. DATABASE TABLE & SEEDER
 # ==============================================================================
-
-class KhataLedger(Base):
-    __tablename__ = "khata_ledger"
-
-    id = Column(Integer, primary_key=True, index=True)
-    merchant_id = Column(String, index=True, default="M_101")
-    name = Column(String, index=True, nullable=False)
-    phone_no = Column(String, nullable=True)
-    amount = Column(Float, default=0.0)
-    date_given = Column(Date, nullable=True)
-    promised_return_date = Column(Date, nullable=True)
-
-
-engine = create_engine(APP_DB_URL, connect_args={"check_same_thread": False})
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-
-def init_and_seed_khata():
-    logfire.info("Initializing khata ledger database", database_url=APP_DB_URL)
-    Base.metadata.create_all(bind=engine)
-    db = SessionLocal()
-    try:
-        if db.query(KhataLedger).filter_by(merchant_id="M_101").first():
-            return
-
-        today = date.today()
-        demo_rows = [
-            # Overdue by 1 day -> Will trigger a recovery notification!
-            KhataLedger(
-                merchant_id="M_101",
-                name="Raju",
-                phone_no="9876500001",
-                amount=1200.0,
-                date_given=today - timedelta(days=6),
-                promised_return_date=today - timedelta(days=1),
-            ),
-            # Due Today -> Will trigger a recovery notification!
-            KhataLedger(
-                merchant_id="M_101",
-                name="Lakshmi",
-                phone_no="9876500002",
-                amount=850.0,
-                date_given=today - timedelta(days=4),
-                promised_return_date=today,
-            ),
-            # Due in 4 days -> Active normal credit
-            KhataLedger(
-                merchant_id="M_101",
-                name="Suresh",
-                phone_no="9876500003",
-                amount=450.0,
-                date_given=today - timedelta(days=2),
-                promised_return_date=today + timedelta(days=4),
-            ),
-        ]
-        db.add_all(demo_rows)
-        db.commit()
-    finally:
-        db.close()
-
-
-init_and_seed_khata()
-
 
 # ==============================================================================
 # 2. HELPER FUNCTIONS
@@ -159,7 +93,7 @@ async def manage_khata_ledger(
     amount: Optional[float] = None,
     date_given: Optional[str] = None,
     promised_return_date: Optional[str] = None,
-    merchant_id: str = "M_101",
+    merchant_id: str = "M123456",
 ) -> Dict[str, Any]:
     """
     Logs, checks, or updates customer credit (udhaar) details in the merchant's Khata ledger.

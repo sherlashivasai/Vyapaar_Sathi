@@ -56,10 +56,23 @@ uv run python -m src.data_ingestion
 
 All settlement, khata, and environment-intelligence tables are stored in the shared `vyapar_saathi.db` database at the repository root. The backend also emits structured Logfire traces for database writes, cache refreshes, and key merchant operations so the database can be inspected and monitored in one place.
 
+## Reusable prototype demo data
+
+The sample merchant profile and sample khata records are kept in [src/demo_data.py](src/demo_data.py), separate from the live voice and tool logic. The app seeds missing sample ledger rows at startup; seeding is idempotent and uses the demo merchant ID consistently. To seed the same records manually, run:
+
+```powershell
+uv run python -m src.demo_data
+```
+
+The demo profile is illustrative, and its loan-limit value is not a real eligibility result.
+
 ## Project layout
 
 ```text
 main.py                         FastAPI app and browser WebSocket
+src/db.py                       Shared SQLite engine and schema initialization
+src/models.py                   Central ORM model definitions
+src/demo_data.py                Reusable prototype merchant and ledger fixtures
 src/voice_agent_sarvam.py       Saarvam voice session and event handling
 src/tools/                      Settlement ingestion and analysis utilities
 src/frontend/                   Browser interface and media client

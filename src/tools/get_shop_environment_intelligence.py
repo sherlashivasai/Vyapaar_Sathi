@@ -7,12 +7,9 @@ from typing import Dict, Any, Optional, List
 import httpx
 import logfire
 from sarvamai import AsyncSarvamAI
-from sqlalchemy import Column, String, Float, DateTime, Text, create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
 
-from src.db import APP_DB_URL
-
-Base = declarative_base()
+from src.db import APP_DB_URL, SessionLocal
+from src.models import EnvIntelligenceCache
 
 # Refresh interval: 4 hours (in seconds)
 CACHE_TTL_HOURS = 4
@@ -33,21 +30,6 @@ WMO_CODES = {
 # ==============================================================================
 # 1. PERSISTENT CACHE DATABASE MODEL (SQLite)
 # ==============================================================================
-
-class EnvIntelligenceCache(Base):
-    __tablename__ = "env_intelligence_cache"
-
-    cache_key = Column(String, primary_key=True, index=True)  # "{store_location}::{shop_category}"
-    store_location = Column(String, index=True)
-    shop_category = Column(String)
-    payload_json = Column(Text, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow)
-
-
-engine = create_engine(APP_DB_URL, connect_args={"check_same_thread": False})
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base.metadata.create_all(bind=engine)
-logfire.info("Environment intelligence database initialized", database_url=APP_DB_URL)
 
 # Fast in-memory L1 cache layered on top of SQLite L2 cache
 _MEMORY_CACHE: Dict[str, Dict[str, Any]] = {}
@@ -135,12 +117,17 @@ async def _run_sub_llm_grounded_intelligence(store_location: str, shop_category:
 
     prompt = f"""
     You are a hyper-local market intelligence analyst for a "{shop_category}" located in "{store_location}" on {now_str}.
-    Give practical retail advice for this region across these 4 areas:
+    Give cautious retail advice for this region across these 4 areas:
 
     1. Dynamic Mandi Prices & Wholesale Trends (Based on Category: "{shop_category}")
     2. Civic Outages and local disruptions
     3. Protests, Bandhs & Traffic Disruptions
     4. Festivals & Local Demand Radar
+
+    You do not have live web search or verified local data in this request. Do not invent
+    prices, trends, outages, protests, traffic alerts, or event dates. Return empty arrays
+    for those fields unless the information is explicitly known from reliable context.
+    Keep general stocking suggestions clearly framed as suggestions, not live facts.
 
     Return ONLY a valid raw JSON object (no markdown fences) with this exact structure:
     {{
@@ -198,10 +185,12 @@ async def _run_sub_llm_grounded_intelligence(store_location: str, shop_category:
         return {
             "dynamically_selected_items": ["Onion", "Tomato", "Sugar", "Edible Oil"],
             "mandi_prices_and_trends": [],
-            "civic_outages": [f"No major power or water outages reported in {store_location} right now."],
-            "protests_and_disruptions": ["Normal street traffic; no protests or bandhs reported."],
+            "civic_outages": [],
+            "protests_and_disruptions": [],
             "festivals_and_events": [],
-            "top_actionable_suggestions": ["Maintain buffer stock of daily fast-moving essentials."],
+            "top_actionable_suggestions": [
+                "Check verified local market and civic updates before changing stock."
+            ],
             "grounding_error": str(e),
         }
 
@@ -243,8 +232,8 @@ async def compute_and_cache_env_intelligence(
         "live_weather": weather_data,
         "local_intelligence": llm_intel,
         "message": (
-            f"Loaded local weather, dynamic {shop_category} mandi trends, civic outages, "
-            f"protests, and festival alerts for {store_location}."
+            f"Loaded live weather and generated general retail suggestions for {store_location}. "
+            "Local prices and civic events are not independently verified."
         ),
     }
 

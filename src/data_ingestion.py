@@ -6,113 +6,28 @@ from pathlib import Path
 import logfire
 import pandas as pd
 from sqlalchemy import (
-    Column,
-    MetaData,
-    Numeric,
-    String,
-    Table,
-    create_engine,
     inspect,
-    insert,
-    select,
-    text,
 )
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-if __package__:
-    from .db import APP_DB_URL
-else:
-    from db import APP_DB_URL
-
-
-PRIMARY_KEY_COLUMNS = ("phonepereferenceid", "instrument")
-NUMERIC_COLUMNS = {"amount", "fee", "igst", "cgst", "sgst"}
-SETTLEMENT_COLUMNS = (
-    "paymenttype",
-    "merchantreferenceid",
-    "phonepereferenceid",
-    "from",
-    "instrument",
-    "creationdate",
-    "transactiondate",
-    "settlementdate",
-    "bankreferenceno",
-    "amount",
-    "fee",
-    "igst",
-    "cgst",
-    "sgst",
+from src.db import APP_DB_URL, DB_PATH, get_engine, init_db
+from src.models import (
+    SETTLEMENT_COLUMNS,
+    SETTLEMENT_PRIMARY_KEY_COLUMNS,
+    SETTLEMENT_TABLE_NAME,
 )
 
 
-def _define_table(table_name: str, column_names: tuple[str, ...]) -> Table:
-    metadata = MetaData()
-    columns = [
-        Column(
-            name,
-            Numeric(18, 6) if name in NUMERIC_COLUMNS else String,
-            primary_key=name in PRIMARY_KEY_COLUMNS,
-            nullable=name not in PRIMARY_KEY_COLUMNS,
-        )
-        for name in column_names
-    ]
-    return Table(table_name, metadata, *columns)
-
-
-def _migrate_sqlite_primary_key(
-    engine,
-    table_name: str,
-    column_names: tuple[str, ...],
-) -> None:
-    temporary_name = f"{table_name}__migration"
-    with engine.connect() as connection:
-        if inspect(connection).has_table(temporary_name):
-            raise RuntimeError(
-                f"Cannot migrate '{table_name}': temporary table "
-                f"'{temporary_name}' already exists."
-            )
-
-        old_table = Table(table_name, MetaData(), autoload_with=connection)
-        new_table = _define_table(temporary_name, column_names)
-        connection.commit()
-        transaction = connection.begin()
-        try:
-            connection.exec_driver_sql("BEGIN IMMEDIATE")
-            new_table.create(connection)
-            connection.execute(
-                insert(new_table).from_select(
-                    column_names,
-                    select(*(old_table.c[name] for name in column_names)),
-                )
-            )
-            preparer = connection.dialect.identifier_preparer
-            connection.execute(text(f"DROP TABLE {preparer.quote(table_name)}"))
-            connection.execute(
-                text(
-                    f"ALTER TABLE {preparer.quote(temporary_name)} "
-                    f"RENAME TO {preparer.quote(table_name)}"
-                )
-            )
-            transaction.commit()
-        except Exception:
-            transaction.rollback()
-            raise
-
-
-def _ensure_table(engine, table_name: str, column_names: tuple[str, ...]) -> None:
+def _ensure_table(engine) -> None:
     inspector = inspect(engine)
-    if not inspector.has_table(table_name):
-        table = _define_table(table_name, column_names)
-        table.metadata.create_all(engine)
-        return
-
+    table_name = SETTLEMENT_TABLE_NAME
+    expected_columns = set(SETTLEMENT_COLUMNS)
     existing_columns = {column["name"] for column in inspector.get_columns(table_name)}
-    expected_columns = set(column_names)
     if existing_columns != expected_columns:
         missing = sorted(expected_columns - existing_columns)
         unexpected = sorted(existing_columns - expected_columns)
         raise ValueError(
-            f"Table '{table_name}' does not match the input schema. "
+            f"Table '{table_name}' does not match the registered schema. "
             f"Missing columns: {missing}; unexpected columns: {unexpected}. "
             "The table was left unchanged."
         )
@@ -120,14 +35,11 @@ def _ensure_table(engine, table_name: str, column_names: tuple[str, ...]) -> Non
     primary_key = tuple(
         inspector.get_pk_constraint(table_name).get("constrained_columns") or ()
     )
-    if set(primary_key) != set(PRIMARY_KEY_COLUMNS):
-        if engine.dialect.name != "sqlite":
-            raise ValueError(
-                f"Table '{table_name}' must use the composite primary key "
-                f"{PRIMARY_KEY_COLUMNS}; automatic migration is only supported "
-                "for SQLite."
-            )
-        _migrate_sqlite_primary_key(engine, table_name, column_names)
+    if primary_key != SETTLEMENT_PRIMARY_KEY_COLUMNS:
+        raise ValueError(
+            f"Table '{table_name}' must use the composite primary key "
+            f"{SETTLEMENT_PRIMARY_KEY_COLUMNS}; found {primary_key}."
+        )
 
 
 def _append_rows(table, connection, keys, data_iter) -> int:
@@ -137,7 +49,7 @@ def _append_rows(table, connection, keys, data_iter) -> int:
 
     statement = sqlite_insert(table.table).values(rows)
     statement = statement.on_conflict_do_nothing(
-        index_elements=list(PRIMARY_KEY_COLUMNS)
+        index_elements=list(SETTLEMENT_PRIMARY_KEY_COLUMNS)
     )
     result = connection.execute(statement)
     return result.rowcount or 0
@@ -199,13 +111,11 @@ class DataIngestion:
     def ingest_to_sql(
         self,
         file_path: str,
-        db_url: str = APP_DB_URL,
-        table_name: str | None = None,
     ) -> int:
         """Append a CSV or PDF to a SQL table, skipping existing transaction keys."""
+        init_db()
         file_extension = os.path.splitext(file_path)[1].lower()
-        if table_name is None:
-            table_name = Path(file_path).stem.lower().replace(" ", "_")
+        table_name = SETTLEMENT_TABLE_NAME
 
         with logfire.span(
             "Ingest input file",
@@ -217,6 +127,7 @@ class DataIngestion:
                 "Reading input file",
                 file_path=file_path,
                 file_extension=file_extension,
+                database_url=APP_DB_URL,
             )
             try:
                 if file_extension == ".csv":
@@ -238,21 +149,21 @@ class DataIngestion:
                     "Input columns do not match the expected settlement report "
                     f"schema. Found: {list(df.columns)}"
                 )
-            if df[list(PRIMARY_KEY_COLUMNS)].isna().any().any():
+            if df[list(SETTLEMENT_PRIMARY_KEY_COLUMNS)].isna().any().any():
                 raise ValueError(
-                    f"Primary-key columns {PRIMARY_KEY_COLUMNS} cannot contain nulls."
+                    f"Primary-key columns {SETTLEMENT_PRIMARY_KEY_COLUMNS} cannot contain nulls."
                 )
 
             logfire.info(
                 "Parsed input",
                 row_count=len(df),
                 columns=list(df.columns),
-                database_url=db_url,
+                database_url=APP_DB_URL,
             )
 
-            engine = create_engine(db_url, connect_args={"check_same_thread": False})
+            engine = get_engine()
             try:
-                _ensure_table(engine, table_name, SETTLEMENT_COLUMNS)
+                _ensure_table(engine)
                 with engine.begin() as connection:
                     rows_inserted = int(
                         df.to_sql(
@@ -272,9 +183,6 @@ class DataIngestion:
                     table_name=table_name,
                 )
                 raise
-            finally:
-                engine.dispose()
-
             logfire.info(
                 "Stored rows in SQL table",
                 row_count=rows_inserted,
@@ -292,15 +200,14 @@ if __name__ == "__main__":
     if not data_files:
         raise FileNotFoundError(f"No settlement CSV files found in {data_directory}")
 
-    database_path = project_root / "vyapar_saathi.db"
-    database_url = f"sqlite:///{database_path.as_posix()}"
-    target_table = "merchant_settlement_reports"
     ingestion = DataIngestion()
-    logfire.info("Using unified merchant database for settlement ingestion", database_url=database_url)
+    logfire.info(
+        "Using unified merchant database for settlement ingestion",
+        database_path=str(DB_PATH),
+        database_url=APP_DB_URL,
+    )
 
     for path in data_files:
         ingestion.ingest_to_sql(
             file_path=str(path),
-            db_url=database_url,
-            table_name=target_table,
         )
