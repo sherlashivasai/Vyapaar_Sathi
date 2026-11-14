@@ -14,8 +14,8 @@ from .prompts import build_merchant_system_prompt
 
 merchant_profile = {
     "merchant_id": "M123456",
-    "merchant_name": "Rajaiah",
-    "shop_name": "Rajaiah Kirana Store",
+    "merchant_name": "mahesh",
+    "shop_name": "Mahesh Kirana Store",
     "shop_category": "Kirana & General Store",
     "items_available": [
         "Rice", "Wheat Flour", "Sugar", "Cooking Oil", "Onions", "Potatoes",
